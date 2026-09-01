@@ -338,6 +338,14 @@ h1{
 .shot button:hover{background:var(--bad)}
 
 .btn.go{width:100%;font-size:16px;padding:15px}
+.lib-err{
+  border:1px solid var(--bad);background:var(--bad-bg);color:var(--bad);
+  border-radius:12px;padding:12px 13px;font-size:13.5px;line-height:1.55;
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+}
+.lib-err button{
+  flex:none;border:1px solid currentColor;border-radius:9px;padding:5px 12px;font-size:13px;
+}
 .why{
   background:var(--surface-2);border:1px solid var(--line);border-radius:11px;
   padding:10px 12px;font-size:13.5px;line-height:1.6;color:var(--ink);
@@ -1221,7 +1229,13 @@ function logFetch(where, res, extra){
    לכל מחובר; פרטית רק לבעלים. שתי המדיניות נאכפות ב-RLS.
    =========================================================== */
 const ROWS_KEY = 'shinun-rows';
-let ROWS = jread(ROWS_KEY, null);        /* null = עוד לא נמשך מהשרת */
+/* מצב הספרייה מפורש. 'unknown' אינו 'ריק' — זו ההפרדה שכל הבאגים
+   של המערכת נבעו מהיעדרה. רק 'ok' הוא תשובה מחייבת. */
+const LIB = {
+  status: jread(ROWS_KEY, null) ? 'cached' : 'unknown',   /* unknown · cached · ok · error */
+  rows:   jread(ROWS_KEY, null) || [],
+  reason: null
+};
 let pendingShare = null;                 /* נושא שהגיע בקישור לפני התחברות */
 
 function rest(path, init){
@@ -1241,26 +1255,36 @@ function rest(path, init){
    יופיע גם אם רשומת המינוי חסרה. */
 const DECK_COLS = 'id,kind,title,subtitle,color,visibility,data,item_count,owner_id';
 
+/* כל קריאה מרוחקת מחזירה {ok, data} או {ok:false, reason}. לעולם לא
+   מערך חשוף, שאי אפשr להבדיל בו בין "ריק" ל"לא הצלחתי לשאול". */
+function readJson(path){
+  return rest(path)
+    .then(function(r){
+      if(!r.ok) return {ok:false, reason:'HTTP ' + r.status};
+      return r.json().then(function(d){ return {ok:true, data:d}; });
+    })
+    .catch(function(e){ return {ok:false, reason:(e && e.message) || 'שגיאת רשת'}; });
+}
+
 function fetchLibrary(){
-  /* בלי uid אי אפשר לדעת מה שלי, וספרייה "ריקה" הייתה מוחקת את המראה */
-  if(!canSync() || !AUTH.uid) return Promise.resolve(null);
-  const mine = rest('decks?select=' + DECK_COLS + '&owner_id=eq.' + AUTH.uid)
-    .then(function(r){ return r.ok ? r.json() : null; });
+  if(!canSync())   return Promise.resolve({ok:false, reason:'אין חיבור'});
+  if(!AUTH.uid)    return Promise.resolve({ok:false, reason:'זהות לא נפתרה'});
 
-  const subbed = fetchSubs().then(function(ids){
-    if(ids === null) return null;
-    if(!ids.length) return [];
-    return rest('decks?select=' + DECK_COLS + '&id=in.(' + ids.join(',') + ')')
-      .then(function(r){ return r.ok ? r.json() : null; });
-  });
-
-  return Promise.all([mine, subbed]).then(function(res){
-    /* null מאחד הצדדים = השאילתה נכשלה, ואז לא דורסים כלום */
-    if(res[0] === null || res[1] === null) return null;
-    const byId = {};
-    res[0].concat(res[1]).forEach(function(d){ if(d && d.id) byId[d.id] = d; });
-    return Object.keys(byId).map(function(k){ return byId[k]; });
-  }).catch(function(){ return null; });
+  return readJson('decks?select=' + DECK_COLS + '&owner_id=eq.' + AUTH.uid)
+    .then(function(mine){
+      if(!mine.ok) return mine;
+      return fetchSubs().then(function(subs){
+        if(!subs.ok) return subs;
+        if(!subs.data.length) return {ok:true, data:mine.data};
+        return readJson('decks?select=' + DECK_COLS + '&id=in.(' + subs.data.join(',') + ')')
+          .then(function(sub){
+            if(!sub.ok) return sub;
+            const byId = {};
+            mine.data.concat(sub.data).forEach(function(d){ if(d && d.id) byId[d.id] = d; });
+            return {ok:true, data:Object.keys(byId).map(function(k){ return byId[k]; })};
+          });
+      });
+    });
 }
 
 function fetchStore(){
@@ -1278,11 +1302,11 @@ function fetchMine(){
     .catch(function(){ return []; });
 }
 function fetchSubs(){
-  if(!canSync()) return Promise.resolve(null);
-  return rest('deck_subscriptions?select=deck_id')
-    .then(function(r){ return r.ok ? r.json() : null; })
-    .then(function(l){ return l ? l.map(function(x){ return x.deck_id; }) : null; })
-    .catch(function(){ return null; });
+  if(!canSync()) return Promise.resolve({ok:false, reason:'אין חיבור'});
+  return readJson('deck_subscriptions?select=deck_id').then(function(res){
+    if(!res.ok) return res;
+    return {ok:true, data:res.data.map(function(x){ return x.deck_id; })};
+  });
 }
 
 function subscribe(deckId){
@@ -1411,17 +1435,21 @@ function importStarter(){
 /* טעינת הספרייה: מהשרת אם אפשר, אחרת מהמראה המקומי,
    ואם גם הוא ריק — מהתוכן המוטמע, כדי שהאפליקציה לא תהיה ריקה. */
 function loadLibrary(){
-  return fetchLibrary().then(function(rows){
-    /* מערך — גם ריק — הוא תשובה מחייבת מהשרת. null פירושו שלא הצלחנו
-       לשאול, ואז נשארים עם המראה המקומי. */
-    if(rows){ ROWS = rows; jwrite(ROWS_KEY, ROWS); }
+  return fetchLibrary().then(function(res){
+    if(res.ok){
+      LIB.status = 'ok'; LIB.rows = res.data; LIB.reason = null;
+      jwrite(ROWS_KEY, LIB.rows);
+    } else {
+      /* נשארים עם מה שיש — מטמון או ריק — ומסמנים למה */
+      LIB.status = LIB.rows.length ? 'cached' : 'error';
+      LIB.reason = res.reason;
+    }
     applyRows();
-  }).catch(function(){ applyRows(); });
+    return res;
+  });
 }
 function applyRows(){
-  /* ROWS ריק אחרי תשובת שרת = הספרייה באמת ריקה, וזה מה שצריך להציג.
-     ROWS שהוא null = השרת מעולם לא ענה, ואז התוכן המוטמע עדיף על מסך ריק. */
-  DECKS = buildDecks(ROWS || localRows());
+  DECKS = buildDecks(LIB.rows);
   render();
 }
 
@@ -1537,7 +1565,7 @@ function localRows(){
   return rows;
 }
 
-let DECKS = buildDecks(ROWS && ROWS.length ? ROWS : localRows());
+let DECKS = buildDecks(LIB.rows);
 
 function deckById(id){ return DECKS.filter(function(d){return d.id===id;})[0]; }
 
@@ -1690,7 +1718,13 @@ function renderHome(){
       '<div class="stat"><b>'+(store.rounds||0)+'</b><span>סבבים</span></div>'+
     '</button>'+
     (!DECKS.length
-      ? '<p class="note">אין עדיין נושאים בספרייה שלך. פתח את מאגר הנושאים כדי להוסיף.</p>'
+      ? (LIB.status === 'error'
+          ? '<div class="lib-err">לא הצלחתי לטעון את הנושאים'+
+              (LIB.reason ? ' — '+esc(LIB.reason) : '')+'.'+
+              '<button id="retryLib">נסה שוב</button></div>'
+          : LIB.status === 'unknown'
+            ? '<p class="note">טוען את הספרייה…</p>'
+            : '<p class="note">אין עדיין נושאים בספרייה שלך. פתח את מאגר הנושאים כדי להוסיף.</p>')
       : totalDue
         ? '<button class="btn primary go" id="goBtn">חזרה עכשיו · '+
             Math.min(totalDue, ROUND)+' כרטיסים</button>'
@@ -1729,6 +1763,12 @@ function renderHome(){
   const go = app.querySelector('#goBtn');
   if(go) go.addEventListener('click', startMixed);
   app.querySelector('#examBtn').addEventListener('click', openExamSheet);
+  const rt = app.querySelector('#retryLib');
+  if(rt) rt.addEventListener('click', function(){
+    rt.disabled = true; rt.textContent = 'טוען…';
+    LIB.status = 'unknown'; render();
+    (AUTH && AUTH.uid ? Promise.resolve() : loadIdentity()).then(loadLibrary);
+  });
   const sb = app.querySelector('#storeBtn');
   if(sb) sb.addEventListener('click', function(){ openStore(); });
   app.querySelector('#statsBtn').addEventListener('click', function(){
@@ -1801,7 +1841,7 @@ function renderDeck(){
     setVisibility(d.row.id, pub ? 'private' : 'public').then(function(r){
       if(!r.ok) throw new Error('failed');
       d.row.visibility = pub ? 'private' : 'public';
-      jwrite(ROWS_KEY, ROWS);
+      jwrite(ROWS_KEY, LIB.rows);
       render();
     }).catch(function(){ pb.disabled = false; });
   });
@@ -2498,8 +2538,8 @@ function renderStore(){
         ' · הרשאת עריכה: '+((AUTH && AUTH.editor) ? '✓' : '✗')+'</div>'+
       '<div>מהשרת: '+(view.mine||[]).length+' שלי · '+(view.others||[]).length+' של אחרים · '+
         (view.subs||[]).length+' מינויים</div>'+
-      '<div>במכשיר: '+((ROWS && ROWS.length) || 0)+' נושאים במטמון · '+
-        DECKS.length+' מוצגים</div>'+
+      '<div>ספרייה: '+esc(LIB.status)+(LIB.reason ? ' ('+esc(LIB.reason)+')' : '')+
+        ' · '+LIB.rows.length+' במטמון · '+DECKS.length+' מוצגים</div>'+
       '<div class="diag-acts">'+
         '<button id="reloadSrv">משוך מהשרת</button>'+
         '<button id="wipeCache">אפס מטמון מקומי</button>'+
@@ -2544,7 +2584,7 @@ function renderStore(){
   const wc = app.querySelector('#wipeCache');
   if(wc) wc.addEventListener('click', function(){
     try{ localStorage.removeItem(ROWS_KEY); }catch(e){}
-    ROWS = null;
+    LIB.status = 'unknown'; LIB.rows = []; LIB.reason = null;
     location.reload();
   });
 
@@ -2796,7 +2836,20 @@ function renderErrors(){
   });
 }
 
+/* 48 מקומות בקוד קוראים ל-render, וכל תשובה אסינכרונית ציירה בעצמה.
+   מכאן "מופיע לשנייה ונעלם". עכשיו כל הקריאות מתאחדות לציור אחד
+   בפריים הבא, כך שאין מצב ביניים שמוצג. */
+let renderPending = false;
 function render(){
+  if(renderPending) return;
+  renderPending = true;
+  const run = function(){ renderPending = false; paint(); };
+  if(typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+  else setTimeout(run, 0);
+}
+function renderNow(){ renderPending = false; paint(); }
+
+function paint(){
   if(authEnabled && !AUTH){ renderLock(); window.scrollTo(0,0); return; }
   if(quiz && quiz.done) renderResults();
   else if(quiz) renderQuiz();
@@ -2819,17 +2872,45 @@ document.addEventListener('keydown', function(e){
   if(n>=1 && n<=4 && !q.answered) answer(q.options[n-1].id);
 });
 
-render();
-if(canSync()){
-  verifyAccess(false);
-  pullCards();
-  flushQueue();
-  /* קודם זהות — הספרייה והבעלות תלויות ב-uid */
-  (authEnabled ? loadIdentity() : Promise.resolve())
-    .then(function(){ flushErrors(); checkAdmin(); })
-    .then(loadLibrary);
-} else if(authEnabled) {
-  loadIdentity();
+/* ===========================================================
+   רצף העלייה. סדר אחד, מפורש, ובודק תלויות במקום להניח אותן.
+   קודם מצייר ממה שיש במכשיר — כך שאין מסך ריק — ורק אחר כך פונה
+   לשרת. כל מה שדורש uid ממתין לזהות במקום לחזור בשקט עם "ריק".
+   =========================================================== */
+let booted = false;
+function boot(){
+  if(booted) return Promise.resolve();
+  booted = true;
+
+  renderNow();                       /* מיידי, מהמטמון */
+  if(!canSync()){
+    if(authEnabled) loadIdentity();
+    return Promise.resolve();
+  }
+
+  return loadIdentity()              /* זהות אחת, לפני כל השאר */
+    .then(function(){
+      if(!AUTH){ render(); return; }
+      /* מכאן והלאה יש uid, ואפשר לשגר במקביל */
+      return Promise.all([
+        loadLibrary(),
+        pullCards(),
+        flushQueue(),
+        flushErrors(),
+        checkAdmin(),
+        verifyAccess(false)
+      ]);
+    })
+    .then(function(){
+      if(pendingShare && AUTH){
+        const id = pendingShare; pendingShare = null; openStore(id);
+      }
+      render();
+    })
+    .catch(function(err){
+      logError('client', 'boot → ' + ((err && err.message) || 'נכשל'), null);
+      render();
+    });
 }
 
 /* קישור לנושא — פותח את המאגר עם הנושא בראש הרשימה */
@@ -2840,4 +2921,6 @@ if(canSync()){
   const open = function(){ if(canSync()) openStore(shared); };
   if(AUTH) setTimeout(open, 400); else pendingShare = shared;
 })();
+
+boot();
 </script>

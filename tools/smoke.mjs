@@ -38,6 +38,10 @@ await new Promise((r) => win.addEventListener('load', r, { once: true }));
 const { document } = win;
 const check = (cond, msg) => { if (!cond) fail.push(msg); };
 
+/* אין יותר נפילה אוטומטית לתוכן המוטמע — הבדיקה טוענת ספרייה במפורש,
+   בדיוק כמו משתמש שהתוכן שלו הגיע מהשרת. */
+win.eval('(function(){ LIB.status="ok"; LIB.rows = localRows(); applyRows(); renderNow(); })()');
+
 /* 1 — מסך הבית עלה */
 check(!!document.querySelector('.deck-list'), 'מסך הבית לא נרנדר');
 const cards = document.querySelectorAll('.deck-card');
@@ -81,7 +85,7 @@ for (const deck of DECKS ?? []) {
 
 /* 3 — מסך חידון אמיתי נרנדר בלי לזרוק */
 try {
-  win.eval(`startQuiz(${JSON.stringify(DECKS[0].id)}, ${JSON.stringify(DECKS[0].modes[0].id)})`);
+  win.eval(`startQuiz(${JSON.stringify(DECKS[0].id)}, ${JSON.stringify(DECKS[0].modes[0].id)}); renderNow();`);
   check(!!document.querySelector('.stage'), 'מסך החידון לא נרנדר');
   check(document.querySelectorAll('.opt').length === 4, 'אין 4 כפתורי תשובה');
 } catch (e) {
@@ -154,7 +158,7 @@ try {
   check(c.days >= 9 && c.days <= 11, `ספירת הימים למבחן שגויה: ${c.days}`);
 
   try {
-    win.eval('startMixed()');
+    win.eval('startMixed(); renderNow();');
     const q = win.eval('JSON.stringify({n:quiz.qs.length, deck:quiz.deck.id, keys:quiz.qs.map(x=>x.key.split(":")[0])})');
     const info = JSON.parse(q);
     check(info.deck === 'all', 'הסבב המאוחד לא סומן כחבילת all');
@@ -169,7 +173,7 @@ try {
 {
   const isoDeck = (DECKS ?? []).find((d) => d.map);
   if (isoDeck) {
-    win.eval(`(function(){ quiz=null; view={name:"map", back:${JSON.stringify(isoDeck.id)}}; render(); })()`);
+    win.eval(`(function(){ quiz=null; view={name:"map", back:${JSON.stringify(isoDeck.id)}}; renderNow(); })()`);
     const nodes = document.querySelectorAll('.node').length;
     check(nodes >= isoDeck.map.iso.length, `המפה הציגה ${nodes} צמתים, פחות מהצפוי`);
   }
@@ -186,12 +190,12 @@ for (const deck of DECKS ?? []) {
 }
 try {
   const first = DECKS[0];
-  win.eval(`(function(){ quiz=null; view={name:'browse', deck:${JSON.stringify(first.id)}, q:'', hide:false}; render(); })()`);
+  win.eval(`(function(){ quiz=null; view={name:'browse', deck:${JSON.stringify(first.id)}, q:'', hide:false}; renderNow(); })()`);
   check(!!document.querySelector('.browse-wrap'), 'מסך העיון לא נרנדר');
   check(document.querySelectorAll('.bcard').length === first.items.length,
     `מסך העיון הראה ${document.querySelectorAll('.bcard').length} כרטיסים במקום ${first.items.length}`);
   /* סינון שלא תואם לכלום לא אמור להשאיר כרטיסים */
-  win.eval(`(function(){ view.q='zzzzנונסנס'; render(); })()`);
+  win.eval(`(function(){ view.q='zzzzנונסנס'; renderNow(); })()`);
   check(document.querySelectorAll('.bcard').length === 0, 'הסינון בעיון לא סינן');
 } catch (e) {
   fail.push('מסך העיון נפל: ' + e.message);
@@ -206,7 +210,7 @@ try {
             {id:'m2', title:'שלי ציבורית', item_count:4, visibility:'public'}],
       others:[{id:'s1', title:'של אחר', item_count:7, visibility:'public'},
               {id:'s2', title:'עוד אחד', item_count:5, visibility:'public'}]};
-    render();
+    renderNow();
   })()`);
   const cards = document.querySelectorAll('.scard').length;
   check(cards === 4, `החנות הציגה ${cards} חבילות במקום 4`);
@@ -230,15 +234,17 @@ try {
 {
   const behaviour = win.eval(`(function(){
     const before = DECKS.length;
-    ROWS = []; applyRows();
+    const snap = LIB.rows.slice();
+    LIB.rows = []; LIB.status='ok'; applyRows(); renderNow();
     const emptyAnswer = DECKS.length;
-    ROWS = null; applyRows();
+    LIB.rows = []; LIB.status='error'; applyRows(); renderNow();
     const noAnswer = DECKS.length;
+    LIB.rows = snap; LIB.status='ok'; applyRows(); renderNow();
     return JSON.stringify({before:before, emptyAnswer:emptyAnswer, noAnswer:noAnswer});
   })()`);
   const b = JSON.parse(behaviour);
   check(b.emptyAnswer === 0, `ספרייה ריקה מהשרת הציגה ${b.emptyAnswer} נושאים במקום 0`);
-  check(b.noAnswer === b.before, 'כישלון משיכה לא נפל חזרה לתוכן המוטמע');
+  check(b.noAnswer === 0, 'כישלון משיכה בלי מטמון אמור להשאיר ספרייה ריקה, לא תוכן מוטמע');
 }
 
 /* 5b2 — זיהוי כפילויות שומר את הראשון שנוצר */
@@ -257,16 +263,44 @@ try {
   check(r.indexOf('d') < 0, 'נושא ייחודי סומן ככפילות');
 }
 
+/* 5c1 — ארבעת מצבי הספרייה, ומה כל אחד מציג */
+{
+  const states = JSON.parse(win.eval(`(function(){
+    const out = {};
+    const snap = LIB.rows.slice();
+    quiz = null; view = {name:'home'};      /* מסכי הבדיקות הקודמות */
+
+    LIB.status='unknown'; LIB.rows=[]; applyRows(); renderNow();
+    out.unknown = {decks:DECKS.length, html:app.innerHTML.indexOf('טוען את הספרייה') > -1};
+
+    LIB.status='error'; LIB.reason='HTTP 500'; LIB.rows=[]; applyRows(); renderNow();
+    out.error = {decks:DECKS.length, shows:app.innerHTML.indexOf('לא הצלחתי לטעון') > -1,
+                 reason:app.innerHTML.indexOf('HTTP 500') > -1};
+
+    LIB.status='ok'; LIB.reason=null; LIB.rows=[]; applyRows(); renderNow();
+    out.empty = {decks:DECKS.length, shows:app.innerHTML.indexOf('אין עדיין נושאים') > -1};
+
+    LIB.status='cached'; LIB.rows=snap; applyRows(); renderNow();
+    out.cached = {decks:DECKS.length};
+
+    LIB.status='ok'; applyRows(); renderNow();
+    return JSON.stringify(out);
+  })()`));
+  check(states.unknown.decks === 0 && states.unknown.html, 'מצב unknown לא מציג טעינה');
+  check(states.error.decks === 0 && states.error.shows, 'מצב error לא מציג שגיאה');
+  check(states.error.reason, 'מצב error לא מציג את הסיבה');
+  check(states.empty.decks === 0 && states.empty.shows, 'ספרייה ריקה מהשרת לא מציגה מצב ריק');
+  check(states.cached.decks > 0, 'מטמון לא מוצג');
+}
+
 /* 5c2 — משיכת ספרייה לא מוחקת את המראה כשהיא לא מצליחה לענות */
 {
   /* משיכה אסינכרונית ותלוית שרת; נבדק כאן החוזה שמונע מחיקת המראה */
   const src = win.eval('fetchLibrary.toString()');
-  check(src.indexOf('!AUTH.uid) return Promise.resolve(null)') > -1,
-    'משיכה בלי uid לא מחזירה null');
-  check(src.indexOf('res[0] === null || res[1] === null') > -1,
-    'כישלון באחת השאילתות לא מסומן כ-null');
-  check(win.eval('fetchSubs.toString()').indexOf('return null') > -1,
-    'fetchSubs לא מבחין בין ריק לכישלון');
+  check(src.indexOf("reason:'זהות לא נפתרה'") > -1, 'משיכה בלי uid לא מחזירה סיבה');
+  check(src.indexOf('if(!mine.ok) return mine') > -1, 'כישלון שאילתה לא מוחזר כתוצאה');
+  check(win.eval('fetchSubs.toString()').indexOf('{ok:true, data:') > -1,
+    'fetchSubs לא מחזיר תוצאה מפורשת');
 }
 
 /* 5d — מסך הסטטיסטיקה: תחזית, כרטיסי מידע ופירוט לפי נושא */
@@ -282,7 +316,7 @@ try {
     });
     quiz = null;
     view = {name:'stats', stats:{loading:false, total:180, correct:149, week:63}};
-    render();
+    renderNow();
   })()`);
   const bars = document.querySelectorAll('.bar-mark').length;
   const hits = document.querySelectorAll('.bar-hit').length;
@@ -364,14 +398,38 @@ try {
         {id:1, at:'2026-09-01T10:00:00Z', kind:'fetch', message:'GET decks → 401', context:{status:401}},
         {id:2, at:'2026-09-01T10:05:00Z', kind:'client', message:'x is not defined', context:{line:12}}
       ]};
-      render();
+      renderNow();
     })()`);
     check(document.querySelectorAll('.erow').length === 2, 'מסך היומן לא הציג את השורות');
-    win.eval(`(function(){ view.filter='401'; render(); })()`);
+    win.eval(`(function(){ view.filter='401'; renderNow(); })()`);
     check(document.querySelectorAll('.erow').length === 1, 'הסינון ביומן לא סינן');
   } catch (e) {
     fail.push('מסך היומן נפל: ' + e.message);
   }
+}
+
+/* 5g — רצף העלייה: ציור מיידי, זהות לפני שאילתות, וציור מאוחד */
+{
+  const src = win.eval('boot.toString()');
+  check(src.indexOf('renderNow()') > -1, 'העלייה לא מציירת מיידית מהמטמון');
+  check(src.indexOf('loadIdentity()') < src.indexOf('loadLibrary()'),
+    'הספרייה נמשכת לפני שהזהות נפתרה');
+  check(src.indexOf('booted') > -1, 'העלייה יכולה לרוץ פעמיים');
+
+  /* קריאות render מרובות מתאחדות לציור אחד */
+  const coalesced = JSON.parse(win.eval(`(function(){
+    let painted = 0;
+    const real = paint;
+    paint = function(){ painted++; return real.apply(null, arguments); };
+    render(); render(); render();
+    const during = painted;
+    renderNow();
+    const after = painted;
+    paint = real;
+    return JSON.stringify({during:during, after:after});
+  })()`));
+  check(coalesced.during === 0, 'render צייר מיידית במקום לאחד');
+  check(coalesced.after === 1, 'renderNow לא צייר בדיוק פעם אחת');
 }
 
 /* 6 — בלי מפגש שמור, מסך הנעילה מופיע ושום דבר אחר לא */
