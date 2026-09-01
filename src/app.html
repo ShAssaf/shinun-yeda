@@ -346,6 +346,14 @@ h1{
 .lib-err button{
   flex:none;border:1px solid currentColor;border-radius:9px;padding:5px 12px;font-size:13px;
 }
+.lib-warn{
+  border:1px solid var(--c-o);border-radius:12px;padding:10px 12px;
+  font-size:12.5px;line-height:1.5;color:var(--c-o);
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+}
+.lib-warn button{
+  flex:none;border:1px solid currentColor;border-radius:9px;padding:4px 11px;font-size:12.5px;
+}
 .why{
   background:var(--surface-2);border:1px solid var(--line);border-radius:11px;
   padding:10px 12px;font-size:13.5px;line-height:1.6;color:var(--ink);
@@ -1717,6 +1725,11 @@ function renderHome(){
       '<div class="stat"><b dir="ltr">'+totalMastered+'<span style="font-size:14px;color:var(--ink-2)">/'+totalItems+'</span></b><span>נשלטים</span></div>'+
       '<div class="stat"><b>'+(store.rounds||0)+'</b><span>סבבים</span></div>'+
     '</button>'+
+    (LIB.status === 'cached' && canSync()
+      ? '<div class="lib-warn">מוצג מהמטמון המקומי — לא הצלחתי לרענן מהשרת'+
+          (LIB.reason ? ' ('+esc(LIB.reason)+')' : '')+'.'+
+          '<button id="refreshLib">רענן</button></div>'
+      : '')+
     (!DECKS.length
       ? (LIB.status === 'error'
           ? '<div class="lib-err">לא הצלחתי לטעון את הנושאים'+
@@ -1763,6 +1776,11 @@ function renderHome(){
   const go = app.querySelector('#goBtn');
   if(go) go.addEventListener('click', startMixed);
   app.querySelector('#examBtn').addEventListener('click', openExamSheet);
+  const rf = app.querySelector('#refreshLib');
+  if(rf) rf.addEventListener('click', function(){
+    rf.disabled = true; rf.textContent = 'מרענן…';
+    (AUTH && AUTH.uid ? Promise.resolve() : loadIdentity()).then(loadLibrary);
+  });
   const rt = app.querySelector('#retryLib');
   if(rt) rt.addEventListener('click', function(){
     rt.disabled = true; rt.textContent = 'טוען…';

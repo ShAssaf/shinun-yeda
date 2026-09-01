@@ -281,7 +281,7 @@ try {
     out.empty = {decks:DECKS.length, shows:app.innerHTML.indexOf('אין עדיין נושאים') > -1};
 
     LIB.status='cached'; LIB.rows=snap; applyRows(); renderNow();
-    out.cached = {decks:DECKS.length};
+    out.cached = {decks:DECKS.length, warns:app.innerHTML.indexOf('מוצג מהמטמון המקומי') > -1};
 
     LIB.status='ok'; applyRows(); renderNow();
     return JSON.stringify(out);
@@ -291,6 +291,7 @@ try {
   check(states.error.reason, 'מצב error לא מציג את הסיבה');
   check(states.empty.decks === 0 && states.empty.shows, 'ספרייה ריקה מהשרת לא מציגה מצב ריק');
   check(states.cached.decks > 0, 'מטמון לא מוצג');
+  check(states.cached.warns, 'הצגת מטמון ישן לא מסומנת למשתמש');
 }
 
 /* 5c2 — משיכת ספרייה לא מוחקת את המראה כשהיא לא מצליחה לענות */
