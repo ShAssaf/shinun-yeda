@@ -1,3 +1,4 @@
 {
-  "addQuestionUrl": "https://pedtujzyqjxzrhcvxshj.supabase.co/functions/v1/add-question"
+  "addQuestionUrl": "https://pedtujzyqjxzrhcvxshj.supabase.co/functions/v1/add-question",
+  "editAppUrl": "https://pedtujzyqjxzrhcvxshj.supabase.co/functions/v1/edit-app"
 }
