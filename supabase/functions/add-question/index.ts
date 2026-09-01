@@ -1,17 +1,17 @@
 /**
- * add-question — מקבל בקשה בשפה חופשית, מבקש מ-Claude פריט תוכן תקין,
- * מאמת אותו מול הסכימה, ומבצע commit ל-data/decks.json ברפו.
- * ה-Action של GitHub בונה ומדפלוי את האתר מחדש.
+ * add-question — מקבל בקשה בשפה חופשית (וגם צילומי שקפים), מבקש מ-Claude
+ * פריט תוכן תקין, מאמת אותו מול הסכימה, וכותב ישירות לטבלת decks.
+ *
+ * הכתיבה נעשית עם הטוקן של המשתמש, כך ש-RLS אוכף בעלות — הפונקציה אינה
+ * יכולה לגעת בנושא שאינו שלו. אין commit, אין בנייה, והשינוי מיידי.
  *
  * משתני סביבה נדרשים (supabase secrets set):
  *   ANTHROPIC_API_KEY   מפתח ה-API
- *   GITHUB_TOKEN        fine-grained PAT עם contents:write על הרפו הזה בלבד
- *   GITHUB_REPO         "owner/repo"
- *   APP_PASSPHRASE      סיסמה שהאפליקציה שולחת
+ *   ALLOWED_EMAILS      מי רשאי לערוך
+ *   APP_PASSPHRASE      מסלול חירום ללא התחברות
  *   MODEL               אופציונלי, ברירת מחדל claude-opus-5
  */
 import Anthropic from 'npm:@anthropic-ai/sdk@0.71.0';
-import { decodeBase64, encodeBase64 } from 'jsr:@std/encoding@1/base64';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -19,7 +19,9 @@ const CORS = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const DECK_KEYS = ['groups', 'elements', 'iso', 'isoTerms', 'isoPairs', 'topics', 'ui'] as const;
+/* חלקי התוכן שאפשר לערוך בתוך נושא, לפי סוגו */
+const SECTIONS = ['items', 'iso', 'isoTerms', 'isoPairs'] as const;
+const DECK_KEYS = ['groups', 'elements', 'iso', 'isoTerms', 'isoPairs', 'topics'] as const;
 type DeckKey = typeof DECK_KEYS[number];
 
 const REL_KEYS = ['chain', 'position', 'functional', 'geometric',
@@ -101,6 +103,10 @@ function validateItem(deck: DeckKey, item: Record<string, unknown>, i: number, e
     if (!REL_KEYS.includes(item.rel as string)) errs.push(`${path}.rel חייב אחד מ-${REL_KEYS}`);
     isMolecule(item.A, `${path}.A`, errs);
     isMolecule(item.B, `${path}.B`, errs);
+  } else if (deck === 'topics') {
+    /* כרטיס בנושא חופשי: מושג מול הסבר */
+    str(item, 'front', path, errs);
+    str(item, 'back', path, errs);
   }
 }
 
@@ -175,127 +181,172 @@ async function authorize(req: Request, body: { passphrase?: string }, pass: stri
 
 /* ---------- הנחיה ל-Claude ---------- */
 
-const SYSTEM = `אתה עורך התוכן של אפליקציית שינון לביוכימיה, בעברית.
-המשתמש מבקש להוסיף פריט או לתקן פריט קיים. אתה מחזיר את הפריטים בכלי propose_patch בלבד.
+const SYSTEM = `אתה עורך התוכן של אפליקציית שינון, בעברית.
+המשתמש מבקש להוסיף פריטים או לתקן קיימים. אתה מחזיר אותם בכלי propose_content בלבד.
 
-מבנה הנתונים לפי חבילה:
+לכל נושא יש סוג (kind) שקובע את מבנה הפריטים שלו:
 
-groups — קבוצה פונקציונלית:
+groups — קבוצה פונקציונלית. הפריטים במקטע "items":
   id (slug), en (שם אנגלי), he (שם עברי), cat (hc|ox|n|s|p),
   a — אטומים: [{"t":"C","x":1,"y":0}]  t היא התווית המוצגת (C, O, N, S, P, H, R, R¹, O⁻, N⁺, OH, CH₃ ...)
   b — קשרים: [[i,j,order]] אינדקסים למערך a. order: 1 יחיד, 2 כפול, 3 טריז, 4 מקווקו.
 
-elements — יסוד:
-  id (זהה ל-sym), sym (סמל), en, he, cat (bulk|trace), role (תפקיד ביוכימי, משפט אחד בעברית)
+elements — יסוד. מקטע "items":
+  id (זהה ל-sym), sym, en, he, cat (bulk|trace), role (תפקיד ביוכימי, משפט אחד בעברית)
 
-iso — צומת בעץ האיזומרים:
-  id, he, en, parent (id של צומת קיים), depth (מספר), color (מחרוזת CSS כמו "var(--c-o)"), def, ex
+iso — עץ האיזומרים. שלושה מקטעים נפרדים:
+  "iso"      צומת בעץ: id, he, en, parent (id של צומת קיים), depth (מספר),
+             color (מחרוזת CSS כמו "var(--c-o)"), def, ex
+  "isoTerms" מושג נלווה: id, he, en, def, ex
+  "isoPairs" זוג מבנים לזיהוי יחס: id, rel, label, A ו-B (כל אחד {"a":[...],"b":[...]}), why
+             rel אחד מ: chain|position|functional|geometric|enantiomers|diastereomers|conformers|same
 
-isoTerms — מושג נלווה: id, he, en, def, ex
-
-ui — תוויות הממשק (טקסט בלבד, לא תוכן לימודי). מבנה הפריטים שונה:
-  [{"path":"cats.s","value":"גופרית"}] — path הוא נתיב נקודות לתווית קיימת, value המחרוזת החדשה.
-  נתיבים זמינים: cats.<hc|ox|n|s|p> · rel.<chain|position|functional|geometric|enantiomers|diastereomers|conformers|same>
-  decks.<fg|el|iso>.title · .sub · .modes.<id>.title · .modes.<id>.desc · .legend.<key>
-  ב-ui תמיד mode="replace". אי אפשר להוסיף נתיב חדש, רק לשנות ערך של נתיב קיים.
-
-topics — חבילת נושא חופשית. **זה היעד לכל נושא שאינו קבוצה פונקציונלית, יסוד או איזומריה**:
-  ביולוגיה של התא, מסלולים מטבוליים, אנזימולוגיה, פרמקולוגיה, ויטמינים — הכול.
-  אל תסרב לבקשה בטענה שאין חבילה מתאימה. אם אין — צור חבילת נושא חדשה.
-  פריט: {"id":"microtubules","title":"מיקרוטובולים","sub":"שלד התא",
-          "cards":[{"id":"tubulin","front":"טובולין","frontSub":"Tubulin",
-                    "back":"דימר α/β שממנו נבנה המיקרוטובול","note":"הערה אופציונלית"}]}
-  front הוא המושג, back הוא ההסבר. נדרשים לפחות 4 כרטיסים כדי שהחבילה תופיע.
-  mode="add" ליצירת חבילה חדשה, mode="replace" להוספת כרטיסים או תיקון בחבילה קיימת
-  (הכרטיסים ממוזגים לפי id — קיים מוחלף, חדש נוסף).
-
-isoPairs — זוג מבנים לזיהוי היחס:
-  id, rel (chain|position|functional|geometric|enantiomers|diastereomers|conformers|same),
-  label, A ו-B (כל אחד {"a":[...],"b":[...]} כמו ב-groups), why (הסבר קצר בעברית)
+topic — נושא חופשי. מקטע "items", כרטיסים:
+  id, front (המושג), frontSub (אופציונלי, בלועזית), back (ההסבר), note (אופציונלי)
+  **זה היעד לכל נושא שאינו קבוצות פונקציונליות, יסודות או איזומריה** — ביולוגיה
+  של התא, מסלולים מטבוליים, אנזימולוגיה, פרמקולוגיה, ויטמינים, הכול.
+  אל תסרב בטענה שאין נושא מתאים. אם אין — target="new_topic" ותיצור אחד.
 
 כללי ציור מולקולות:
 - הרשת ביחידות של 1. קשר טיפוסי באורך 1 עד 1.5. תוויות ארוכות (CH₂OH) דורשות מרווח 1.5.
 - x גדל ימינה, y גדל למטה.
 - אל תמציא גיאומטריה מסובכת. שרשרת אופקית פשוטה עדיפה על טבעת שגויה.
-- לטריז ומקווקו יש משמעות סטראוכימית — השתמש בהם רק כשהיא רלוונטית.
+- לטריז ומקווקו יש משמעות סטראוכימית — רק כשהיא רלוונטית.
 
-אם צורפו תמונות, הן צילומי מסך של שקפים מהרצאה:
-- קרא את השקף, חלץ את המושגים שנבחנים עליהם, ובנה מהם פריטים.
-- ברירת המחדל לשקף היא חבילת topics חדשה, עם כותרת שנגזרת מנושא השקף.
-  אם השקף עוסק בקבוצות פונקציונליות, ביסודות או באיזומריה — הוסף לחבילה הקיימת.
-- אל תמציא מה שלא בשקף. אם משהו לא קריא, דלג עליו במקום לנחש.
-- כמה פריטים שהשקף מצדיק, בין 4 ל-20. שקף אחד עמוס עדיף שיפוצל לפריטים נפרדים.
-- אם צורפה גם בקשה בטקסט, היא גוברת על ברירות המחדל האלה.
+אם צורפו תמונות, הן צילומי שקפים מהרצאה:
+- חלץ את המושגים שנבחנים עליהם ובנה מהם פריטים.
+- ברירת המחדל לשקף היא נושא חדש, אלא אם הוא מתאים לנושא קיים.
+- אל תמציא מה שלא בשקף. משהו לא קריא — דלג עליו במקום לנחש.
+- בין 4 ל-20 פריטים לפי מה שהשקף מצדיק.
+- בקשה בטקסט גוברת על ברירות המחדל האלה.
 
 כללים:
-- id ייחודי, באותיות אנגליות קטנות ומקפים. אל תתנגש ב-id קיים אלא אם אתה מתקן פריט קיים (אז mode="replace" ואותו id).
-- טקסט למשתמש בעברית. שמות אנגליים נשארים באנגלית.
-- דיוק מדעי קודם לכל. אם הבקשה שגויה עובדתית, תקן אותה וציין זאת ב-summary.
-- אם הבקשה לא ברורה או לא שייכת לאף חבילה, החזר items ריק והסבר ב-summary.`;
+- id ייחודי, אותיות אנגליות קטנות ומקפים. אל תתנגש ב-id קיים אלא אם אתה
+  מתקן פריט קיים, ואז mode="replace" ואותו id.
+- טקסט למשתמש בעברית. שמות ומונחים לועזיים נשארים בלועזית.
+- דיוק מדעי קודם לכל. בקשה שגויה עובדתית — תקן וציין זאת ב-summary.
+- נושא חדש חייב ארבעה פריטים לפחות, אחרת אי אפשר לייצר ארבע אפשרויות.
+- אם הבקשה אינה ברורה, החזר items ריק והסבר ב-summary.`;
 
 const TOOL: Anthropic.Tool = {
-  name: 'propose_patch',
-  description: 'מחזיר את הפריטים להוספה או להחלפה בקובץ התוכן.',
+  name: 'propose_content',
+  description: 'מחזיר את הפריטים להוספה או להחלפה, ולאיזה נושא הם שייכים.',
   strict: true,
   input_schema: {
     type: 'object',
     additionalProperties: false,
     properties: {
-      deck: { type: 'string', enum: [...DECK_KEYS], description: 'לאיזו חבילה' },
-      mode: { type: 'string', enum: ['add', 'replace'], description: 'add להוספה, replace לתיקון פריט קיים לפי id' },
-      items_json: {
+      target: {
         type: 'string',
-        description: 'מערך JSON של הפריטים, כמחרוזת. חייב להיות JSON תקין.',
+        enum: ['existing', 'new_topic'],
+        description: 'existing כדי לערוך נושא קיים, new_topic כדי ליצור חדש',
       },
+      deck_id:  { type: 'string', description: 'מזהה הנושא כשהיעד existing, אחרת מחרוזת ריקה' },
+      new_title:    { type: 'string', description: 'כותרת הנושא החדש, אחרת מחרוזת ריקה' },
+      new_subtitle: { type: 'string', description: 'תת־כותרת קצרה, אפשר ריק' },
+      section: {
+        type: 'string',
+        enum: [...SECTIONS],
+        description: 'items לרוב הנושאים. בנושא iso: iso, isoTerms או isoPairs',
+      },
+      mode: { type: 'string', enum: ['add', 'replace'], description: 'add להוספה, replace לתיקון לפי id' },
+      items_json: { type: 'string', description: 'מערך JSON של הפריטים, כמחרוזת' },
       summary: { type: 'string', description: 'משפט אחד בעברית — מה נעשה' },
     },
-    required: ['deck', 'mode', 'items_json', 'summary'],
+    required: ['target', 'deck_id', 'new_title', 'new_subtitle', 'section', 'mode', 'items_json', 'summary'],
   },
 };
 
-/* ---------- GitHub ---------- */
+/* ---------- PostgREST בשם המשתמש ---------- */
+/* כל קריאה נושאת את הטוקן של המשתמש, ולכן RLS אוכף בעלות. הפונקציה
+   אינה יכולה לגעת בנושא שאינו שלו גם אם Claude יבקש. */
+type Deck = {
+  id: string; kind: string; title: string; subtitle: string | null;
+  color: string | null; visibility: string; data: unknown; item_count: number;
+};
 
-async function gh(path: string, token: string, init?: RequestInit) {
-  const res = await fetch('https://api.github.com' + path, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-      'User-Agent': 'shinun-add-question',
-      ...(init?.headers ?? {}),
+function db(bearer: string) {
+  const url = Deno.env.get('SUPABASE_URL')?.trim();
+  const anon = Deno.env.get('SUPABASE_ANON_KEY')?.trim();
+  const headers = {
+    apikey: anon ?? '',
+    Authorization: `Bearer ${bearer}`,
+    'Content-Type': 'application/json',
+  };
+  return {
+    async get(path: string) {
+      const r = await fetch(`${url}/rest/v1/${path}`, { headers });
+      if (!r.ok) throw new Error(`קריאה מהמסד נכשלה: ${r.status} ${await r.text()}`);
+      return r.json();
     },
-  });
-  if (!res.ok) {
-    const detail = await res.text();
-    if (res.status === 401)
-      throw new Error('GITHUB_TOKEN אינו תקף. צור טוקן חדש והגדר אותו מחדש ב-supabase secrets.');
-    if (res.status === 403 || res.status === 404)
-      throw new Error(`ל-GITHUB_TOKEN אין הרשאת Contents: Read and write על ${Deno.env.get('GITHUB_REPO')?.trim()}, `
-        + 'או ש-GITHUB_REPO שגוי.');
-    throw new Error(`GitHub ${init?.method ?? 'GET'} ${path}: ${res.status} ${detail.slice(0, 200)}`);
-  }
-  return res.json();
+    async patch(path: string, body: unknown) {
+      const r = await fetch(`${url}/rest/v1/${path}`, {
+        method: 'PATCH',
+        headers: { ...headers, Prefer: 'return=representation' },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error(`עדכון נכשל: ${r.status} ${await r.text()}`);
+      return r.json();
+    },
+    async post(path: string, body: unknown) {
+      const r = await fetch(`${url}/rest/v1/${path}`, {
+        method: 'POST',
+        headers: { ...headers, Prefer: 'return=representation' },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error(`יצירה נכשלה: ${r.status} ${await r.text()}`);
+      return r.json();
+    },
+  };
 }
 
-/* ---------- handler ---------- */
+/* המקטע שבתוכו יושבים הפריטים, לפי סוג הנושא */
+function sectionOf(deck: Deck, wanted: string): { list: Record<string, unknown>[]; put: (v: unknown[]) => unknown } {
+  if (deck.kind === 'iso') {
+    const d = (deck.data ?? {}) as Record<string, unknown[]>;
+    const key = ['iso', 'isoTerms', 'isoPairs'].includes(wanted) ? wanted : 'iso';
+    return {
+      list: (d[key] ?? []) as Record<string, unknown>[],
+      put: (v) => ({ ...d, [key]: v }),
+    };
+  }
+  return {
+    list: (Array.isArray(deck.data) ? deck.data : []) as Record<string, unknown>[],
+    put: (v) => v,
+  };
+}
+
+/* איזה ולידטור מתאים למקטע */
+function validatorKey(deck: Deck, section: string): DeckKey {
+  if (deck.kind === 'iso') {
+    if (section === 'isoTerms') return 'isoTerms';
+    if (section === 'isoPairs') return 'isoPairs';
+    return 'iso';
+  }
+  if (deck.kind === 'groups') return 'groups';
+  if (deck.kind === 'elements') return 'elements';
+  return 'topics';
+}
+
+function countItems(deck: Deck): number {
+  if (deck.kind === 'iso') {
+    const d = (deck.data ?? {}) as Record<string, unknown[]>;
+    return (d.iso?.length ?? 0) + (d.isoTerms?.length ?? 0);
+  }
+  return Array.isArray(deck.data) ? deck.data.length : 0;
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return json({ error: 'POST בלבד' }, 405);
 
-  /* trim — ערך שהודבק עם רווח או שורה חדשה נגררת שובר את האימות מול GitHub */
-  const envRaw = (k: string) => Deno.env.get(k)?.trim();
+  const e = (k: string) => Deno.env.get(k)?.trim();
   const env = {
-    key: envRaw('ANTHROPIC_API_KEY'),
-    token: envRaw('GITHUB_TOKEN'),
-    repo: envRaw('GITHUB_REPO'),
-    pass: envRaw('APP_PASSPHRASE'),
-    model: envRaw('MODEL') ?? 'claude-opus-5',
+    key:   e('ANTHROPIC_API_KEY'),
+    pass:  e('APP_PASSPHRASE') ?? '',
+    model: e('MODEL') ?? 'claude-opus-5',
   };
-  for (const [k, v] of Object.entries(env)) {
-    if (!v) return json({ error: `חסר משתנה סביבה: ${k}` }, 500);
-  }
+  if (!env.key) return json({ error: 'חסר ANTHROPIC_API_KEY' }, 500);
 
   type Shot = { media_type: string; data: string };
   let body: {
@@ -303,28 +354,17 @@ Deno.serve(async (req) => {
   };
   try { body = await req.json(); } catch { return json({ error: 'גוף הבקשה אינו JSON' }, 400); }
 
-  const auth = await authorize(req, body, env.pass!);
+  const auth = await authorize(req, body, env.pass);
   if (!auth.ok) return json({ error: auth.msg }, 401);
+
+  if (body.check) return json({ ok: true, editor: auth.editor, model: env.model });
   if (!auth.editor) return json({ error: auth.msg }, 403);
 
-  /* בדיקת תקינות — מאמתת את שני המפתחות בלי לכתוב כלום ובלי לצרוך טוקנים */
-  if (body.check) {
-    const out: Record<string, string> = { repo: env.repo! };
-    try {
-      await gh(`/repos/${env.repo}/contents/data/decks.json`, env.token!);
-      out.github = 'תקין — קריאה עובדת';
-    } catch (e) { out.github = 'שגיאה: ' + (e as Error).message; }
-    try {
-      await new Anthropic({ apiKey: env.key }).models.list({ limit: 1 });
-      out.anthropic = 'תקין — המפתח מאומת';
-    } catch (e) { out.anthropic = 'שגיאה: ' + (e as Error).message.slice(0, 160); }
-    out.model = env.model!;
-    return json(out, 200);
-  }
+  const bearer = req.headers.get('Authorization')?.replace(/^Bearer\s+/i, '').trim();
+  if (!bearer) return json({ error: 'כתיבה למסד דורשת התחברות, לא סיסמה.' }, 403);
 
   const ask = (body.request ?? '').trim();
   const shots = Array.isArray(body.images) ? body.images.slice(0, MAX_IMAGES) : [];
-
   if (!ask && !shots.length) return json({ error: 'הבקשה ריקה' }, 400);
   if (ask.length > 2000) return json({ error: 'הבקשה ארוכה מדי' }, 400);
   let bytes = 0;
@@ -336,56 +376,31 @@ Deno.serve(async (req) => {
   if (bytes > MAX_IMAGE_BYTES) return json({ error: 'התמונות כבדות מדי. צרף פחות שקפים.' }, 400);
 
   try {
-    /* התוכן הנוכחי — גם כהקשר ל-Claude וגם לצורך ה-sha של ה-commit */
-    const file = await gh(`/repos/${env.repo}/contents/data/decks.json`, env.token!) as
-      { content: string; sha: string; encoding: string; download_url: string };
+    const rest = db(bearer);
 
-    /* GitHub עוטף את ה-base64 בשורות חדשות, ו-decodeBase64 דוחה רווחים.
-       לקבצים גדולים מ-1MB הוא מחזיר encoding "none" וצריך למשוך את הגולמי. */
-    let raw: string;
-    if (file.encoding === 'base64' && file.content) {
-      raw = new TextDecoder().decode(decodeBase64(file.content.replace(/\s+/g, '')));
-    } else {
-      const r = await fetch(file.download_url);
-      if (!r.ok) throw new Error('לא הצלחתי למשוך את data/decks.json');
-      raw = await r.text();
-    }
-    const current = JSON.parse(raw);
+    /* הנושאים שהמשתמש רשאי לערוך — RLS כבר סינן */
+    const me = await rest.get('decks?select=id,kind,title,subtitle,color,visibility,item_count'
+      + '&order=created_at.asc') as Deck[];
 
-    /* מזהים קיימים — מונע התנגשויות וכפילויות */
-    const existing: Record<string, string[]> = {};
-    for (const k of DECK_KEYS) {
-      existing[k] = Array.isArray(current[k]) ? current[k].map((x: { id: string }) => x.id) : [];
-    }
+    const catalogue = me.map((d) => ({
+      id: d.id, kind: d.kind, title: d.title, items: d.item_count,
+    }));
 
-    const hint = body.deck && body.deck !== 'auto'
-      ? `\nהמשתמש בחר את החבילה: ${({ fg: 'groups', el: 'elements', iso: 'iso / isoTerms / isoPairs' })[body.deck as 'fg'] ?? body.deck}`
-      : '';
-
-    /* תמונות לפני הטקסט — כך ממליץ התיעוד, והמודל מתייחס אליהן כהקשר לבקשה */
     const userContent: Anthropic.ContentBlockParam[] = shots.map((sh) => ({
       type: 'image' as const,
       source: { type: 'base64' as const, media_type: sh.media_type as 'image/jpeg', data: sh.data },
     }));
     userContent.push({
       type: 'text',
-      text: `מזהים קיימים בכל חבילה:\n${JSON.stringify(existing)}\n\n`
-        + `דוגמאות לפריטים קיימים (לחיקוי הסגנון):\n`
-        + JSON.stringify({
-          groups: current.groups?.slice(0, 2),
-          elements: current.elements?.slice(0, 1),
-          isoPairs: current.isoPairs?.slice(0, 1),
-        })
-        + (shots.length ? `\n\nצורפו ${shots.length} צילומי שקפים.` : '')
-        + `\n\nבקשת המשתמש:\n${ask || '(אין טקסט — בנה מהשקפים)'}${hint}\n\nקרא לכלי propose_patch.`,
+      text: `הנושאים הקיימים שלי:\n${JSON.stringify(catalogue)}\n\n`
+        + (shots.length ? `צורפו ${shots.length} צילומי שקפים.\n` : '')
+        + `בקשת המשתמש:\n${ask || '(אין טקסט — בנה מהשקפים)'}\n\n`
+        + `קרא לכלי propose_content.`,
     });
 
-    const anthropic = new Anthropic({ apiKey: env.key });
     const t0 = Date.now();
-    /* סטרימינג מאותה סיבה כמו ב-edit-app */
-    const stream = anthropic.messages.stream({
-      model: env.model!,
-      /* שקף מייצר חבילה שלמה, ולכן יותר טוקנים ומאמץ גבוה יותר */
+    const stream = new Anthropic({ apiKey: env.key }).messages.stream({
+      model: env.model,
       max_tokens: shots.length ? 24000 : 8000,
       thinking: { type: 'adaptive' },
       output_config: { effort: shots.length ? 'high' : 'medium' },
@@ -394,96 +409,113 @@ Deno.serve(async (req) => {
       messages: [{ role: 'user', content: userContent }],
     });
     const message = await stream.finalMessage();
-
     const llmSecs = Math.round((Date.now() - t0) / 1000);
-    console.log(`Claude החזיר אחרי ${llmSecs}s`);
 
     const call = message.content.find((b) => b.type === 'tool_use');
     if (!call) {
       const text = message.content.filter((b) => b.type === 'text').map((b) => b.text).join(' ');
       return json({ error: text.slice(0, 300) || 'Claude לא החזיר פריט' }, 422);
     }
-    const patch = call.input as { deck: DeckKey; mode: string; items_json: string; summary: string };
+    const patch = call.input as {
+      target: string; deck_id: string; new_title: string; new_subtitle: string;
+      section: string; mode: string; items_json: string; summary: string;
+    };
 
     let items: Record<string, unknown>[];
     try {
       items = JSON.parse(patch.items_json);
       if (!Array.isArray(items)) throw new Error('לא מערך');
-    } catch (e) {
-      return json({ error: 'ה-JSON שהוחזר אינו תקין: ' + (e as Error).message }, 422);
+    } catch (err) {
+      return json({ error: 'ה-JSON שהוחזר אינו תקין: ' + (err as Error).message }, 422);
     }
     if (!items.length) return json({ error: patch.summary || 'לא נוצר פריט' }, 422);
-    if (!DECK_KEYS.includes(patch.deck)) return json({ error: 'חבילה לא מוכרת' }, 422);
 
-    const errs: string[] = [];
-
-    if (patch.deck === 'topics') {
-      items.forEach((it, i) => validateTopic(it, i, errs));
-      if (typeof items[0]?.id !== 'string' || !/^[a-z0-9][a-z0-9-]{1,40}$/.test(items[0].id as string))
-        errs.push('topics[0].id חייב להיות slug באנגלית קטנה');
+    /* ---------- נושא חדש ---------- */
+    if (patch.target === 'new_topic') {
+      const errs: string[] = [];
+      items.forEach((it, i) => validateItem('topics', it, i, errs));
+      if (items.length < 4) errs.push('נושא חדש דורש ארבעה פריטים לפחות');
+      const ids = new Set<string>();
+      items.forEach((it) => {
+        if (ids.has(it.id as string)) errs.push(`המזהה ${it.id} מופיע פעמיים`);
+        ids.add(it.id as string);
+      });
       if (errs.length) return json({ error: 'לא עבר אימות: ' + errs.slice(0, 4).join(' · ') }, 422);
 
-      current.topics ??= [];
-      for (const t of items) {
-        const found = (current.topics as Record<string, unknown>[]).find((x) => x.id === t.id);
-        if (!found) { current.topics.push(t); continue; }
-        /* מיזוג כרטיסים לפי id — קיים מוחלף, חדש נוסף */
-        const cards = found.cards as Record<string, unknown>[];
-        for (const c of t.cards as Record<string, unknown>[]) {
-          const k = cards.findIndex((x) => x.id === c.id);
-          if (k >= 0) cards[k] = c; else cards.push(c);
-        }
-        if (t.title) found.title = t.title;
-        if (t.sub) found.sub = t.sub;
-      }
-      const short = (current.topics as { title: string; cards: unknown[] }[])
-        .filter((t) => t.cards.length < 4).map((t) => t.title);
-      if (short.length)
-        return json({ error: `חבילה זקוקה ל-4 כרטיסים לפחות. חסרים ב: ${short.join(', ')}` }, 422);
-    } else if (patch.deck === 'ui') {
-      if (patch.mode !== 'replace') errs.push('בתוויות ממשק אפשר רק mode="replace"');
-      items.forEach((it, i) => validateLabel(current.ui, it, i, errs));
-      if (errs.length) return json({ error: 'לא עבר אימות: ' + errs.slice(0, 4).join(' · ') }, 422);
-      for (const it of items) setPath(current.ui, it.path as string, it.value as string);
-    } else {
-      items.forEach((it, i) => validateItem(patch.deck, it, i, errs));
-      const ids = existing[patch.deck];
-      for (const it of items) {
-        const dup = ids.includes(it.id as string);
-        if (patch.mode === 'add' && dup) errs.push(`המזהה ${it.id} כבר קיים`);
-        if (patch.mode === 'replace' && !dup) errs.push(`המזהה ${it.id} לא קיים, אין מה להחליף`);
-      }
-      if (errs.length) return json({ error: 'הפריט לא עבר אימות: ' + errs.slice(0, 4).join(' · ') }, 422);
-
-      const list = current[patch.deck] as Record<string, unknown>[];
-      for (const it of items) {
-        const idx = list.findIndex((x) => x.id === it.id);
-        if (idx >= 0) list[idx] = it; else list.push(it);
-      }
+      /* תמיד מזהה המשתמש עצמו. שאילתה על שורה קיימת הייתה עלולה
+         להחזיר בעלים של נושא ציבורי של מישהו אחר. */
+      const created = await rest.post('decks', [{
+        owner_id:   await currentUid(bearer),
+        kind:       'topic',
+        title:      patch.new_title || 'נושא חדש',
+        subtitle:   patch.new_subtitle || null,
+        color:      null,
+        visibility: 'private',
+        data:       items,
+        item_count: items.length,
+      }]) as Deck[];
+      return json({
+        ok: true, summary: patch.summary, deck: created[0]?.title,
+        deck_id: created[0]?.id, added: items.length, created: true, seconds: llmSecs,
+      });
     }
 
-    const updated = encodeBase64(new TextEncoder().encode(JSON.stringify(current, null, 2) + '\n'));
-    await gh(`/repos/${env.repo}/contents/data/decks.json`, env.token!, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: `תוכן: ${patch.summary}`.slice(0, 90) + '\n\nבקשת המשתמש: ' + ask.slice(0, 400),
-        content: updated,
-        sha: file.sha,
-        branch: 'main',
-      }),
+    /* ---------- נושא קיים ---------- */
+    const target = me.find((d) => d.id === patch.deck_id);
+    if (!target) return json({ error: 'הנושא לא נמצא או שאינו שלך.' }, 422);
+
+    const full = (await rest.get(`decks?select=*&id=eq.${target.id}`) as Deck[])[0];
+    if (!full) return json({ error: 'לא הצלחתי לקרוא את הנושא.' }, 422);
+
+    const sec = sectionOf(full, patch.section);
+    const vkey = validatorKey(full, patch.section);
+
+    const errs: string[] = [];
+    items.forEach((it, i) => validateItem(vkey, it, i, errs));
+    const existingIds = sec.list.map((x) => x.id as string);
+    for (const it of items) {
+      const dup = existingIds.includes(it.id as string);
+      if (patch.mode === 'add' && dup) errs.push(`המזהה ${it.id} כבר קיים בנושא`);
+      if (patch.mode === 'replace' && !dup) errs.push(`המזהה ${it.id} לא קיים, אין מה להחליף`);
+    }
+    if (errs.length) return json({ error: 'הפריט לא עבר אימות: ' + errs.slice(0, 4).join(' · ') }, 422);
+
+    const list = sec.list.slice();
+    for (const it of items) {
+      const idx = list.findIndex((x) => x.id === it.id);
+      if (idx >= 0) list[idx] = it; else list.push(it);
+    }
+    const nextData = sec.put(list);
+    const nextDeck = { ...full, data: nextData };
+
+    await rest.patch(`decks?id=eq.${full.id}`, {
+      data: nextData,
+      item_count: countItems(nextDeck as Deck),
     });
 
     return json({
       ok: true,
       summary: patch.summary,
-      deck: patch.deck,
+      deck: full.title,
+      deck_id: full.id,
+      section: patch.section,
       mode: patch.mode,
-      ids: items.map((i) => i.id ?? i.path),
+      ids: items.map((i) => i.id),
       seconds: llmSecs,
     });
-  } catch (e) {
-    console.error(e);
-    return json({ error: (e as Error).message.slice(0, 400) }, 500);
+  } catch (err) {
+    console.error(err);
+    return json({ error: (err as Error).message.slice(0, 400) }, 500);
   }
 });
+
+/* מזהה המשתמש מהטוקן — נדרש רק כשאין עדיין אף נושא בבעלותו */
+async function currentUid(bearer: string): Promise<string> {
+  const url = Deno.env.get('SUPABASE_URL')?.trim();
+  const anon = Deno.env.get('SUPABASE_ANON_KEY')?.trim();
+  const r = await fetch(`${url}/auth/v1/user`, {
+    headers: { apikey: anon ?? '', Authorization: `Bearer ${bearer}` },
+  });
+  if (!r.ok) throw new Error('לא הצלחתי לזהות את המשתמש');
+  return (await r.json()).id as string;
+}

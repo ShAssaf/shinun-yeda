@@ -547,6 +547,14 @@ try {
     'הדיווח לא מוצג במסך');
 }
 
+/* 5l — הוספת תוכן מרעננת את הספרייה ולא מבקשת רענון ידני */
+{
+  const src = win.eval('openAddSheet.toString()');
+  check(src.indexOf('האתר נבנה מחדש') < 0, 'ההודעה עדיין מבקשת להמתין לבנייה');
+  check(src.indexOf('loadLibrary()') > -1, 'הוספה לא מרעננת את הספרייה');
+  check(src.indexOf('location.reload') < 0, 'הוספה עדיין מרעננת את הדף');
+}
+
 /* 6 — בלי מפגש שמור, מסך הנעילה מופיע ושום דבר אחר לא */
 {
   const locked = new JSDOM(html, {

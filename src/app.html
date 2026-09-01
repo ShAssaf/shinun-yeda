@@ -2396,10 +2396,19 @@ function openAddSheet(){
       if(!res.ok) logError('function', 'add-question → ' + res.status + ' ' + (res.body.error||''), null);
       if(res.status===401){ say('bad', res.body.error || 'ההתחברות נדחתה.'); send.disabled=false; return; }
       if(!res.ok){ say('bad', res.body.error || ('השרת החזיר '+res.status)); send.disabled=false; return; }
-      say('ok', (res.body.summary || 'נוסף.') + ' האתר נבנה מחדש — רענן בעוד כדקה.');
-      send.textContent = 'רענן עכשיו';
-      send.disabled = false;
-      send.onclick = function(){ location.reload(true); };
+      /* הכתיבה למסד מיידית — מרעננים את הספרייה ומראים את התוצאה */
+      const b = res.body;
+      say('work', (b.summary || 'נוסף.') + ' מרענן את הספרייה…');
+      loadLibrary().then(function(){
+        const where = b.deck ? ' ל־' + b.deck : '';
+        say('ok', (b.summary || 'נוסף.') +
+          (b.created ? ' נוצר נושא חדש: ' + (b.deck || '') + '.'
+                     : (b.added || (b.ids && b.ids.length) || '') + ' פריטים נוספו' + where + '.') +
+          ' כבר בספרייה.');
+        send.textContent = 'סגור';
+        send.disabled = false;
+        send.onclick = close;
+      });
     }).catch(function(err){
       say('bad','לא הצלחתי להתחבר: '+err.message);
       send.disabled = false;
