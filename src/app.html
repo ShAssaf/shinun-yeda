@@ -1125,15 +1125,32 @@ function rest(path, init){
     Object.assign({headers: restHeaders()}, init || {}));
 }
 
-/* החבילות שאני רשום אליהן, דרך המינויים */
+/* הספרייה = הנושאים שבבעלותי ∪ אלה שנרשמתי אליהם.
+   שתי שאילתות מפורשות ולא embed: embed שמחזיר null היה מרוקן את
+   הספרייה ומוחק את המראה המקומי. האיחוד גם מבטיח שנושא בבעלותי
+   יופיע גם אם רשומת המינוי חסרה. */
+const DECK_COLS = 'id,kind,title,subtitle,color,visibility,data,item_count,owner_id';
+
 function fetchLibrary(){
-  if(!canSync()) return Promise.resolve(null);
-  return rest('deck_subscriptions?select=decks(id,kind,title,subtitle,color,visibility,data,item_count,owner_id)')
-    .then(function(r){ return r.ok ? r.json() : null; })
-    .then(function(list){
-      if(!list) return null;
-      return list.map(function(x){ return x.decks; }).filter(Boolean);
-    }).catch(function(){ return null; });
+  /* בלי uid אי אפשר לדעת מה שלי, וספרייה "ריקה" הייתה מוחקת את המראה */
+  if(!canSync() || !AUTH.uid) return Promise.resolve(null);
+  const mine = rest('decks?select=' + DECK_COLS + '&owner_id=eq.' + AUTH.uid)
+    .then(function(r){ return r.ok ? r.json() : null; });
+
+  const subbed = fetchSubs().then(function(ids){
+    if(ids === null) return null;
+    if(!ids.length) return [];
+    return rest('decks?select=' + DECK_COLS + '&id=in.(' + ids.join(',') + ')')
+      .then(function(r){ return r.ok ? r.json() : null; });
+  });
+
+  return Promise.all([mine, subbed]).then(function(res){
+    /* null מאחד הצדדים = השאילתה נכשלה, ואז לא דורסים כלום */
+    if(res[0] === null || res[1] === null) return null;
+    const byId = {};
+    res[0].concat(res[1]).forEach(function(d){ if(d && d.id) byId[d.id] = d; });
+    return Object.keys(byId).map(function(k){ return byId[k]; });
+  }).catch(function(){ return null; });
 }
 
 function fetchStore(){
@@ -1151,11 +1168,11 @@ function fetchMine(){
     .catch(function(){ return []; });
 }
 function fetchSubs(){
-  if(!canSync()) return Promise.resolve([]);
+  if(!canSync()) return Promise.resolve(null);
   return rest('deck_subscriptions?select=deck_id')
-    .then(function(r){ return r.ok ? r.json() : []; })
-    .then(function(l){ return l.map(function(x){ return x.deck_id; }); })
-    .catch(function(){ return []; });
+    .then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(l){ return l ? l.map(function(x){ return x.deck_id; }) : null; })
+    .catch(function(){ return null; });
 }
 
 function subscribe(deckId){
@@ -2265,6 +2282,7 @@ function openStore(highlight){
   view = {name:'store', loading:true, mine:[], others:[], subs:[], highlight:highlight||null};
   render();
   Promise.all([fetchMine(), fetchStore(), fetchSubs()]).then(function(r){
+    r[2] = r[2] || [];
     const mineIds = r[0].map(function(d){ return d.id; });
     view.mine   = r[0];
     view.others = r[1].filter(function(d){ return mineIds.indexOf(d.id) < 0; });

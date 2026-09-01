@@ -241,6 +241,18 @@ try {
   check(b.noAnswer === b.before, 'כישלון משיכה לא נפל חזרה לתוכן המוטמע');
 }
 
+/* 5c2 — משיכת ספרייה לא מוחקת את המראה כשהיא לא מצליחה לענות */
+{
+  /* משיכה אסינכרונית ותלוית שרת; נבדק כאן החוזה שמונע מחיקת המראה */
+  const src = win.eval('fetchLibrary.toString()');
+  check(src.indexOf('!AUTH.uid) return Promise.resolve(null)') > -1,
+    'משיכה בלי uid לא מחזירה null');
+  check(src.indexOf('res[0] === null || res[1] === null') > -1,
+    'כישלון באחת השאילתות לא מסומן כ-null');
+  check(win.eval('fetchSubs.toString()').indexOf('return null') > -1,
+    'fetchSubs לא מבחין בין ריק לכישלון');
+}
+
 /* 5d — מסך הסטטיסטיקה: תחזית, כרטיסי מידע ופירוט לפי נושא */
 try {
   win.eval(`(function(){
