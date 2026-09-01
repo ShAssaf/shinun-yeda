@@ -218,6 +218,23 @@ try {
   check(document.querySelectorAll('[data-del]').length === 2, 'אין כפתורי מחיקה לנושאים שלי');
   /* קישור מוצע רק לנושא שכבר פורסם */
   check(document.querySelectorAll('[data-link]').length === 1, 'קישור מוצע לנושא שאינו ציבורי');
+
+  /* נושא שקיים בחבילה המוטמעת ואינו בספרייה חייב להיות מוצע לייבוא,
+     גם כשיש כבר נושאים אחרים — כך תוכן שנתקע במסלול הישן לא אובד. */
+  const offer = JSON.parse(win.eval(`(function(){
+    view.mine = [{id:'m1', kind:'groups', title:localRows()[0].title, item_count:24, visibility:'private'}];
+    view.others = []; view.subs = []; view.loading = false;
+    renderNow();
+    const btn = document.getElementById('seedBtn');
+    return JSON.stringify({
+      offered: !!btn,
+      label: btn ? btn.textContent : '',
+      total: localRows().length
+    });
+  })()`));
+  check(offer.offered, 'נושאים שלא יובאו אינם מוצעים כשכבר יש ספרייה');
+  check(offer.label.indexOf(String(offer.total - 1)) > -1,
+    'מספר הנושאים לייבוא שגוי: ' + offer.label);
   check(document.querySelectorAll('[data-sub]').length === 2, 'אין כפתורי מינוי לחבילות של אחרים');
   /* חבילה שאני רשום אליה מוצגת כ"הסר", ואחת שלא — כ"הוסף" */
   const subBtns = Array.from(document.querySelectorAll('[data-sub]'));

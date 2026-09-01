@@ -2658,6 +2658,13 @@ function renderStore(){
 
   const mine = view.mine || [], others = view.others || [];
   const dups = duplicateDecks(mine);
+  /* מה שקיים בחבילה המוטמעת ועוד לא בספרייה — כולל תוכן שנוצר
+     במסלול הישן ונכתב לריפו במקום למסד */
+  const have = {};
+  mine.forEach(function(d){ have[d.kind + '|' + d.title] = true; });
+  const missing = starterRows(AUTH && AUTH.uid).filter(function(r){
+    return !have[r.kind + '|' + r.title];
+  });
   app.innerHTML =
   '<div class="bar">'+
     '<button class="icon-btn" id="backBtn" aria-label="חזרה">'+icon('arrow')+'</button>'+
@@ -2684,11 +2691,12 @@ function renderStore(){
         ? others.map(function(d){ return card(d, false); }).join('')
         : (view.loading ? '' : '<p class="note">אין כרגע חבילות ציבוריות.</p>'))+
     '</div>'+
-    (!view.loading && !mine.length
+    (!view.loading && missing.length
       ? '<div class="panel share"><div class="share-row">'+
-          '<div><strong>ערכת פתיחה</strong><span>קבוצות פונקציונליות, יסודות ואיזומרים. '+
-            'נוצרת כנושאים פרטיים שלך, ואפשר לפרסם אותם אחר כך.</span></div>'+
-          '<button class="act" id="seedBtn">ייבא</button>'+
+          '<div><strong>'+(mine.length ? 'נושאים שממתינים לייבוא' : 'ערכת פתיחה')+'</strong>'+
+          '<span>'+missing.map(function(r){ return esc(r.title); }).join(' · ')+
+            ' — נוצרים כנושאים פרטיים שלך.</span></div>'+
+          '<button class="act" id="seedBtn">ייבא '+missing.length+'</button>'+
         '</div></div>'
       : '')+
     '<p class="note">פרסום הופך נושא לקריא לכל מי שמחובר. עריכה נשארת אצל הבעלים, '+
