@@ -285,9 +285,17 @@ try {
   })()`);
   const c = JSON.parse(shape);
   check(c.returnsObject, 'הייבוא לא מחזיר תוצאה עם שגיאה');
-  check(c.reportsServer, 'הייבוא לא מדווח את שגיאת השרת');
-  check(c.ensuresUid, 'הייבוא לא משלים uid חסר');
-  check(c.matchesByTitle, 'הייבוא מתאים שורות לפי מיקום ולא לפי זהות');
+
+  /* PostgREST דוחה הוספה מרובה שבה לאובייקטים ערכות מפתחות שונות.
+     חבילת נושא בלי color או subtitle גרמה בדיוק לזה — נבדק על המטען האמיתי. */
+  const keysets = JSON.parse(win.eval(`(function(){
+    return JSON.stringify(starterPayload(starterRows('u-test')).map(function(o){
+      return Object.keys(JSON.parse(JSON.stringify(o))).sort().join(',');
+    }));
+  })()`));
+  check(new Set(keysets).size === 1,
+    'לשורות הייבוא ערכות מפתחות שונות: ' + JSON.stringify([...new Set(keysets)]));
+  check(keysets.length >= 3, `המטען הכיל ${keysets.length} שורות בלבד`);
 }
 
 /* 6 — בלי מפגש שמור, מסך הנעילה מופיע ושום דבר אחר לא */

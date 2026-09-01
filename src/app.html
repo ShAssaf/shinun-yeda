@@ -1180,6 +1180,37 @@ function setVisibility(deckId, vis){
 /* ייבוא ערכת הפתיחה — פעולה מפורשת בלבד. זריעה אוטומטית הייתה יוצרת
    לכל משתמש חדש עותק של תוכן שלא ביקש, וזה נראה כאילו הוא רואה חבילות
    של מישהו אחר. */
+/* PostgREST דורש ערכת מפתחות זהה בכל אובייקט בהוספה מרובה, ו-stringify
+   משמיט מפתחות שערכם undefined. לכן כל שדה נכתב במפורש עם null כברירת מחדל.
+   מופרד לפונקציה כדי שהבדיקה תוכל לאמת את המטען האמיתי. */
+const DECK_FIELDS = ['owner_id','kind','title','subtitle','color','visibility','data','item_count'];
+
+function starterRows(uid){
+  return localRows().map(function(r){
+    const count = r.kind==='iso'
+      ? ((r.data.iso||[]).length + (r.data.isoTerms||[]).length)
+      : (Array.isArray(r.data) ? r.data.length : 0);
+    return {
+      owner_id:   uid,
+      kind:       r.kind,
+      title:      r.title || 'נושא',
+      subtitle:   r.subtitle || null,
+      color:      r.color || null,
+      visibility: 'private',
+      data:       r.data,
+      item_count: count,
+      _oldPrefix: r.id + ':'
+    };
+  });
+}
+function starterPayload(rows){
+  return rows.map(function(r){
+    const o = {};
+    DECK_FIELDS.forEach(function(k){ o[k] = r[k] === undefined ? null : r[k]; });
+    return o;
+  });
+}
+
 function importStarter(){
   if(!canSync()) return Promise.resolve({ok:false, error:'אין חיבור לשרת.'});
 
@@ -1189,15 +1220,8 @@ function importStarter(){
   return ready.then(function(){
     if(!AUTH || !AUTH.uid) return {ok:false, error:'לא הצלחתי לזהות את המשתמש. התחבר מחדש.'};
 
-    const rows = localRows().map(function(r){
-      const count = r.kind==='iso'
-        ? (r.data.iso.length + r.data.isoTerms.length)
-        : (Array.isArray(r.data) ? r.data.length : 0);
-      return {owner_id:AUTH.uid, kind:r.kind, title:r.title, subtitle:r.subtitle,
-              color:r.color, visibility:'private', data:r.data, item_count:count,
-              _oldPrefix:r.id + ':'};
-    });
-    const payload = rows.map(function(r){ const c=Object.assign({},r); delete c._oldPrefix; return c; });
+    const rows = starterRows(AUTH.uid);
+    const payload = starterPayload(rows);
 
     return rest('decks', {
       method:'POST',
