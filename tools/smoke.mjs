@@ -460,6 +460,36 @@ try {
   check(exp.fresh === false, 'טוקן תקף סומן כפג');
 }
 
+/* 5i — כפתור «למה»: ניתן לנסות שוב אחרי כישלון, ושולח שאלה ותשובה לא ריקות */
+{
+  const src = win.eval('renderQuiz.toString()');
+  check(src.indexOf('if(q.whyBusy || whyFor(q.key)) return;') > -1,
+    'כישלון קודם חוסם ניסיון חוזר של «למה»');
+  check(src.indexOf("logError('function', 'explain") > -1, 'כישלון «למה» לא נרשם ביומן');
+  check(win.eval('callFn.toString()').indexOf('ensureToken()') > -1,
+    'קריאה לפונקציה לא מוודאת טוקן תקף');
+
+  /* כל סוגי השאלות, כולל בחירת מבנה שבה לאפשרויות אין טקסט כלל */
+  const built = JSON.parse(win.eval(`(function(){
+    const bad = [];
+    DECKS.forEach(function(d){
+      d.modes.forEach(function(m){
+        for(var r=0;r<4;r++){
+          d.build(m.id, 4).forEach(function(q){
+            const correct = q.options.filter(function(o){ return o.id === q.answer; })[0];
+            const other   = q.options.filter(function(o){ return o.id !== q.answer; })[0];
+            const t = explainText(q, correct, other);
+            if(!t.question || !String(t.question).trim()) bad.push(d.id+'/'+m.id+' שאלה ריקה');
+            if(!t.answer   || !String(t.answer).trim())   bad.push(d.id+'/'+m.id+' תשובה ריקה');
+          });
+        }
+      });
+    });
+    return JSON.stringify(bad.slice(0, 5));
+  })()`));
+  check(built.length === 0, 'טקסט ריק ל«למה»: ' + JSON.stringify(built));
+}
+
 /* 6 — בלי מפגש שמור, מסך הנעילה מופיע ושום דבר אחר לא */
 {
   const locked = new JSDOM(html, {

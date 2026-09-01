@@ -1902,6 +1902,30 @@ function promptHTML(p){
     (p.sub?'<span>'+esc(p.sub)+'</span>':'')+'</div>';
 }
 
+/* טקסט לשאלת ההסבר. באפשרויות מסוג תמונה אין main בכלל, ולכן
+   התשובה יצאה ריקה והשרת החזיר 400 — זה מה ששבר את כפתור «למה». */
+function explainText(q, correct, chosen){
+  const label = function(o){
+    if(!o) return '';
+    return ((o.main || '') + (o.sub ? ' — ' + o.sub : '')).trim();
+  };
+  const prompt = ((q.prompt.main || '') + (q.prompt.sub ? ' — ' + q.prompt.sub : '')).trim();
+
+  if(q.optionKind === 'pic'){
+    /* התשובה היא המבנה, ומה שמזהה אותו הוא הניסוח שבשאלה */
+    return {
+      question: (q.label || 'איזה מבנה מתאים?') + (prompt ? ' — ' + prompt : ''),
+      answer:   prompt || q.label || 'המבנה הנכון',
+      chosen:   'מבנה אחר מבין האפשרויות'
+    };
+  }
+  return {
+    question: prompt || q.label || 'שאלה',
+    answer:   label(correct) || q.label || 'תשובה',
+    chosen:   label(chosen)
+  };
+}
+
 function renderQuiz(){
   const q = quiz.qs[quiz.i];
   const answered = !!q.answered;
@@ -1970,18 +1994,31 @@ function renderQuiz(){
 
   const wb=app.querySelector('#whyBtn');
   if(wb) wb.addEventListener('click', function(){
-    if(q.whyBusy || q.whyText || whyFor(q.key)) return;
-    q.whyBusy = true; render();
+    /* רק ריצה פעילה או הסבר שכבר התקבל חוסמים. כישלון קודם ניתן לנסות שוב —
+       קודם הוא נחסם לצמיתות והכפתור נראה מת. */
+    if(q.whyBusy || whyFor(q.key)) return;
+    q.whyBusy = true; q.whyText = null; renderNow();
+
     const chosen = q.options.filter(function(o){ return o.id===q.answered; })[0];
+    const t = explainText(q, correctOpt, chosen);
+
     callFn(CFG.explainUrl, {
-      question: q.prompt.main || (q.prompt.mol ? q.label + ' — ' + (correctOpt.sub||'') : q.label),
-      answer:   (correctOpt.main||'') + (correctOpt.sub ? ' — '+correctOpt.sub : ''),
-      chosen:   chosen ? chosen.main : '',
+      question: t.question,
+      answer:   t.answer,
+      chosen:   t.chosen,
       deck:     quiz.deck.title
     }).then(function(res){
       q.whyBusy = false;
-      if(res.ok && res.body.text){ q.whyText = res.body.text; whySave(q.key, res.body.text); }
-      else q.whyText = res.body.error || 'לא הצלחתי להסביר.';
+      if(res.ok && res.body.text){
+        q.whyText = res.body.text;
+        whySave(q.key, res.body.text);
+      } else {
+        logError('function', 'explain → ' + res.status + ' ' + (res.body.error || ''),
+                 {deck:quiz.deck.title, key:q.key});
+        q.whyText = res.body.error
+          ? 'לא הצלחתי להסביר: ' + res.body.error
+          : 'לא הצלחתי להסביר.';
+      }
       render();
     });
   });
@@ -2217,14 +2254,16 @@ function refreshToken(){
 /* קריאה לפונקציה עם טוקן המשתמש. מרענן פעם אחת על 401. */
 const CALL_TIMEOUT = 170000;
 function callFn(url, payload, retried){
-  const headers = {'Content-Type':'application/json'};
-  if(AUTH && AUTH.access) headers.Authorization = 'Bearer ' + AUTH.access;
   /* גוזרים בעצמנו, אחרת חיבור שנופל מציג "Failed to fetch" בלי שום מידע */
   const ctl = typeof AbortController==='function' ? new AbortController() : null;
   const t0 = Date.now();
   const timer = ctl ? setTimeout(function(){ ctl.abort(); }, CALL_TIMEOUT) : null;
-  return fetch(url, {method:'POST', headers:headers, body:JSON.stringify(payload),
-                     signal: ctl ? ctl.signal : undefined})
+  return ensureToken().then(function(){
+    const headers = {'Content-Type':'application/json'};
+    if(AUTH && AUTH.access) headers.Authorization = 'Bearer ' + AUTH.access;
+    return fetch(url, {method:'POST', headers:headers, body:JSON.stringify(payload),
+                       signal: ctl ? ctl.signal : undefined});
+  })
     .then(function(r){
       if(timer) clearTimeout(timer);
       if(r.status===401 && AUTH && AUTH.refresh && !retried){
