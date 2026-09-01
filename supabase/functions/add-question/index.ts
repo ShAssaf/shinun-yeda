@@ -19,7 +19,7 @@ const CORS = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const DECK_KEYS = ['groups', 'elements', 'iso', 'isoTerms', 'isoPairs'] as const;
+const DECK_KEYS = ['groups', 'elements', 'iso', 'isoTerms', 'isoPairs', 'ui'] as const;
 type DeckKey = typeof DECK_KEYS[number];
 
 const REL_KEYS = ['chain', 'position', 'functional', 'geometric',
@@ -104,6 +104,26 @@ function validateItem(deck: DeckKey, item: Record<string, unknown>, i: number, e
   }
 }
 
+/* עריכת תווית ממשק — רק מפתחות שכבר קיימים, ורק מחרוזות */
+function getPath(obj: unknown, path: string): unknown {
+  return path.split('.').reduce<unknown>(
+    (o, k) => (o && typeof o === 'object' ? (o as Record<string, unknown>)[k] : undefined), obj);
+}
+function setPath(obj: Record<string, unknown>, path: string, value: string) {
+  const parts = path.split('.');
+  let cur: Record<string, unknown> = obj;
+  for (const k of parts.slice(0, -1)) cur = cur[k] as Record<string, unknown>;
+  cur[parts.at(-1)!] = value;
+}
+function validateLabel(ui: unknown, item: Record<string, unknown>, i: number, errs: string[]) {
+  const path = `ui[${i}]`;
+  if (typeof item.path !== 'string' || !item.path) { errs.push(`${path}.path חסר`); return; }
+  if (typeof item.value !== 'string' || !item.value.trim()) { errs.push(`${path}.value חסר`); return; }
+  if ((item.value as string).length > 200) errs.push(`${path}.value ארוך מדי`);
+  if (typeof getPath(ui, item.path as string) !== 'string')
+    errs.push(`${path}: הנתיב "${item.path}" אינו תווית קיימת`);
+}
+
 /* ---------- הנחיה ל-Claude ---------- */
 
 const SYSTEM = `אתה עורך התוכן של אפליקציית שינון לביוכימיה, בעברית.
@@ -123,6 +143,12 @@ iso — צומת בעץ האיזומרים:
   id, he, en, parent (id של צומת קיים), depth (מספר), color (מחרוזת CSS כמו "var(--c-o)"), def, ex
 
 isoTerms — מושג נלווה: id, he, en, def, ex
+
+ui — תוויות הממשק (טקסט בלבד, לא תוכן לימודי). מבנה הפריטים שונה:
+  [{"path":"cats.s","value":"גופרית"}] — path הוא נתיב נקודות לתווית קיימת, value המחרוזת החדשה.
+  נתיבים זמינים: cats.<hc|ox|n|s|p> · rel.<chain|position|functional|geometric|enantiomers|diastereomers|conformers|same>
+  decks.<fg|el|iso>.title · .sub · .modes.<id>.title · .modes.<id>.desc · .legend.<key>
+  ב-ui תמיד mode="replace". אי אפשר להוסיף נתיב חדש, רק לשנות ערך של נתיב קיים.
 
 isoPairs — זוג מבנים לזיהוי היחס:
   id, rel (chain|position|functional|geometric|enantiomers|diastereomers|conformers|same),
@@ -248,7 +274,9 @@ Deno.serve(async (req) => {
 
     /* מזהים קיימים — מונע התנגשויות וכפילויות */
     const existing: Record<string, string[]> = {};
-    for (const k of DECK_KEYS) existing[k] = (current[k] ?? []).map((x: { id: string }) => x.id);
+    for (const k of DECK_KEYS) {
+      existing[k] = Array.isArray(current[k]) ? current[k].map((x: { id: string }) => x.id) : [];
+    }
 
     const hint = body.deck && body.deck !== 'auto'
       ? `\nהמשתמש בחר את החבילה: ${({ fg: 'groups', el: 'elements', iso: 'iso / isoTerms / isoPairs' })[body.deck as 'fg'] ?? body.deck}`
@@ -293,21 +321,27 @@ Deno.serve(async (req) => {
     if (!DECK_KEYS.includes(patch.deck)) return json({ error: 'חבילה לא מוכרת' }, 422);
 
     const errs: string[] = [];
-    items.forEach((it, i) => validateItem(patch.deck, it, i, errs));
 
-    const ids = existing[patch.deck];
-    for (const it of items) {
-      const dup = ids.includes(it.id as string);
-      if (patch.mode === 'add' && dup) errs.push(`המזהה ${it.id} כבר קיים`);
-      if (patch.mode === 'replace' && !dup) errs.push(`המזהה ${it.id} לא קיים, אין מה להחליף`);
-    }
-    if (errs.length) return json({ error: 'הפריט לא עבר אימות: ' + errs.slice(0, 4).join(' · ') }, 422);
+    if (patch.deck === 'ui') {
+      if (patch.mode !== 'replace') errs.push('בתוויות ממשק אפשר רק mode="replace"');
+      items.forEach((it, i) => validateLabel(current.ui, it, i, errs));
+      if (errs.length) return json({ error: 'לא עבר אימות: ' + errs.slice(0, 4).join(' · ') }, 422);
+      for (const it of items) setPath(current.ui, it.path as string, it.value as string);
+    } else {
+      items.forEach((it, i) => validateItem(patch.deck, it, i, errs));
+      const ids = existing[patch.deck];
+      for (const it of items) {
+        const dup = ids.includes(it.id as string);
+        if (patch.mode === 'add' && dup) errs.push(`המזהה ${it.id} כבר קיים`);
+        if (patch.mode === 'replace' && !dup) errs.push(`המזהה ${it.id} לא קיים, אין מה להחליף`);
+      }
+      if (errs.length) return json({ error: 'הפריט לא עבר אימות: ' + errs.slice(0, 4).join(' · ') }, 422);
 
-    /* החלה */
-    const list = current[patch.deck] as Record<string, unknown>[];
-    for (const it of items) {
-      const idx = list.findIndex((x) => x.id === it.id);
-      if (idx >= 0) list[idx] = it; else list.push(it);
+      const list = current[patch.deck] as Record<string, unknown>[];
+      for (const it of items) {
+        const idx = list.findIndex((x) => x.id === it.id);
+        if (idx >= 0) list[idx] = it; else list.push(it);
+      }
     }
 
     const updated = encodeBase64(new TextEncoder().encode(JSON.stringify(current, null, 2) + '\n'));
@@ -327,7 +361,7 @@ Deno.serve(async (req) => {
       summary: patch.summary,
       deck: patch.deck,
       mode: patch.mode,
-      ids: items.map((i) => i.id),
+      ids: items.map((i) => i.id ?? i.path),
     });
   } catch (e) {
     console.error(e);

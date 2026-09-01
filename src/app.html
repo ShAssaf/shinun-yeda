@@ -431,13 +431,16 @@ function molSVG(g, opts){
    דאטה 1 — קבוצות פונקציונליות
    =========================================================== */
 const GROUPS = DATA.groups;
-const CATS = {
-  hc:{he:'שלד פחמימני', color:'var(--c-c)'},
-  ox:{he:'חמצן', color:'var(--c-o)'},
-  n: {he:'חנקן', color:'var(--c-n)'},
-  s: {he:'גופרית', color:'var(--c-s)'},
-  p: {he:'זרחן', color:'var(--c-p)'},
-};
+/* תוויות הממשק מגיעות מ-data/decks.json, כדי שניתן יהיה לערוך אותן מהאפליקציה */
+const UI = DATA.ui || {};
+const CAT_COLORS = {hc:'var(--c-c)', ox:'var(--c-o)', n:'var(--c-n)', s:'var(--c-s)', p:'var(--c-p)'};
+const CATS = (function(){
+  const out = {};
+  Object.keys(CAT_COLORS).forEach(function(k){
+    out[k] = {he:(UI.cats && UI.cats[k]) || k, color:CAT_COLORS[k]};
+  });
+  return out;
+})();
 
 /* ===========================================================
    דאטה 2 — יסודות עיקריים (bulk) ויסודות קורט (trace)
@@ -455,16 +458,7 @@ const ISO_TERMS = DATA.isoTerms;
 const ISO_ALL = ISO.concat(ISO_TERMS);
 
 /* זוגות מבנים — זיהוי היחס */
-const REL = {
-  chain:      'איזומרי שלד (מבניים)',
-  position:   'איזומרי מיקום (מבניים)',
-  functional: 'איזומרי קבוצה פונקציונלית (מבניים)',
-  geometric:  'איזומרים גיאומטריים (cis/trans)',
-  enantiomers:'אננטיומרים',
-  diastereomers:'דיאסטראומרים',
-  conformers: 'קונפורמרים',
-  same:       'אותה מולקולה בדיוק',
-};
+const REL = UI.rel || {};
 const ISO_PAIRS = DATA.isoPairs;
 
 /* ===========================================================
@@ -627,14 +621,27 @@ function isoQuestion(mode){
    חבילות
    =========================================================== */
 const ROUND = 12;
+/* תוויות החבילות מגיעות מ-DATA.ui.decks — ראה tools/build.mjs */
+function dLbl(deck, key, fallback){
+  const d = (UI.decks || {})[deck] || {};
+  return d[key] || fallback;
+}
+function dModes(deck, list){
+  const m = ((UI.decks || {})[deck] || {}).modes || {};
+  return list.map(function(mo){
+    return {id:mo.id, glyph:mo.glyph,
+            title:(m[mo.id] && m[mo.id].title) || mo.id,
+            desc:(m[mo.id] && m[mo.id].desc) || ''};
+  });
+}
+function dLegend(deck, colors){
+  const l = ((UI.decks || {})[deck] || {}).legend || {};
+  return Object.keys(colors).map(function(k){ return {color:colors[k], he:l[k] || k}; });
+}
 const DECKS = [
-{ id:'fg', title:'קבוצות פונקציונליות', sub:'24 קבוצות · זיהוי מבנה ושם', color:'var(--c-o)',
+{ id:'fg', title:dLbl('fg','title','קבוצות פונקציונליות'), sub:dLbl('fg','sub',''), color:'var(--c-o)',
   items:GROUPS, keyFn:function(g){return 'fg:'+g.id;},
-  modes:[
-    {id:'s2n', glyph:'R–', title:'מבנה ← שם', desc:'רואה מבנה, בוחר מבין 4 שמות'},
-    {id:'n2s', glyph:'Aa', title:'שם ← מבנה', desc:'רואה שם, בוחר מבין 4 מבנים'},
-    {id:'mix', glyph:'⇄',  title:'מעורב', desc:'שני הכיוונים באקראי'},
-  ],
+  modes:dModes('fg', [{id:'s2n',glyph:'R–'},{id:'n2s',glyph:'Aa'},{id:'mix',glyph:'⇄'}]),
   legend:Object.keys(CATS).map(function(k){ return {color:CATS[k].color, he:CATS[k].he}; }),
   build:function(mode){
     fgQuestion.pool = pickWeighted(GROUPS, ROUND, function(g){return 'fg:'+g.id;});
@@ -642,33 +649,23 @@ const DECKS = [
     return out;
   }
 },
-{ id:'el', title:'יסודות עיקריים וקורט', sub:'27 יסודות · bulk מול trace ותפקידים', color:'var(--c-n)',
+{ id:'el', title:dLbl('el','title','יסודות'), sub:dLbl('el','sub',''), color:'var(--c-n)',
   items:ELEMENTS, keyFn:function(e){return 'el:'+e.id;},
-  modes:[
-    {id:'sym',   glyph:'Fe', title:'סמל ← שם', desc:'רואה סמל, בוחר את שם היסוד'},
-    {id:'name',  glyph:'שם', title:'שם ← סמל', desc:'רואה שם עברי, בוחר סמל'},
-    {id:'class', glyph:'⊞',  title:'עיקרי מול קורט', desc:'לזהות מי bulk ומי trace'},
-    {id:'mix',   glyph:'⇄',  title:'מעורב + תפקידים', desc:'כולל שאלות תפקיד ביוכימי'},
-  ],
-  legend:[{color:'var(--c-n)',he:'11 יסודות עיקריים (bulk)'},{color:'var(--c-s)',he:'16 יסודות קורט (trace)'}],
+  modes:dModes('el', [{id:'sym',glyph:'Fe'},{id:'name',glyph:'שם'},{id:'class',glyph:'⊞'},{id:'mix',glyph:'⇄'}]),
+  legend:dLegend('el', {bulk:'var(--c-n)', trace:'var(--c-s)'}),
   build:function(mode){
     elQuestion.pool = pickWeighted(ELEMENTS, ROUND, function(e){return 'el:'+e.id;});
     const out=[]; for(let i=0;i<ROUND;i++) out.push(elQuestion(mode));
     return out;
   }
 },
-{ id:'iso', title:'איזומרים', sub:'כל העץ · ממבניים ועד אנומרים', color:'var(--c-p)',
+{ id:'iso', title:dLbl('iso','title','איזומרים'), sub:dLbl('iso','sub',''), color:'var(--c-p)',
   items:ISO_ALL, keyFn:function(n){return 'iso:'+n.id;},
   map:true,
-  modes:[
-    {id:'def',  glyph:'?',  title:'הגדרה ← מונח', desc:'רואה הגדרה, בוחר את המונח'},
-    {id:'term', glyph:'≡',  title:'מונח ← הגדרה', desc:'רואה מונח, בוחר את ההגדרה'},
-    {id:'tree', glyph:'⌂',  title:'מיקום בעץ', desc:'תחת איזו קטגוריה יושב כל מונח'},
-    {id:'pair', glyph:'A|B',title:'זיהוי יחס', desc:'שני מבנים — מה היחס ביניהם'},
-    {id:'mix',  glyph:'⇄',  title:'מעורב', desc:'כל סוגי השאלות יחד'},
-  ],
-  legend:[{color:'var(--c-o)',he:'מבניים'},{color:'var(--c-n)',he:'מרחביים'},
-          {color:'var(--c-p)',he:'קונפיגורציוניים'},{color:'var(--c-s)',he:'תת־סוגים'}],
+  modes:dModes('iso', [{id:'def',glyph:'?'},{id:'term',glyph:'≡'},{id:'tree',glyph:'⌂'},
+                       {id:'pair',glyph:'A|B'},{id:'mix',glyph:'⇄'}]),
+  legend:dLegend('iso', {structural:'var(--c-o)', stereo:'var(--c-n)',
+                         config:'var(--c-p)', sub:'var(--c-s)'}),
   build:function(mode){
     isoQuestion.pool = pickWeighted(ISO_ALL, ROUND, function(n){return 'iso:'+n.id;});
     isoQuestion.treePool = pickWeighted(ISO.filter(function(x){return x.parent;}), ROUND, function(n){return 'iso:'+n.id;});
