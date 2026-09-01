@@ -62,11 +62,18 @@ Deno.serve(async (req) => {
   const key = e('ANTHROPIC_API_KEY'), pass = e('APP_PASSPHRASE') ?? '';
   if (!key) return json({ error: 'חסר ANTHROPIC_API_KEY' }, 500);
 
-  let body: { passphrase?: string; question?: string; answer?: string; chosen?: string; deck?: string };
+  let body: {
+    passphrase?: string; question?: string; answer?: string;
+    chosen?: string; deck?: string; verify?: boolean;
+  };
   try { body = await req.json(); } catch { return json({ error: 'גוף הבקשה אינו JSON' }, 400); }
 
   const auth = await authorize(req, body, pass);
   if (!auth.ok) return json({ error: auth.msg }, 401);
+
+  /* בדיקת הרשאה בלבד — בלי קריאה למודל. הלקוח קורא לזה פעם אחר התחברות,
+     כדי שרשימת המורשים תישאר בשרת ולא תודלף בקוד הצד־לקוחי. */
+  if (body.verify) return json({ ok: true });
 
   const question = (body.question ?? '').slice(0, 600);
   const answer = (body.answer ?? '').slice(0, 600);

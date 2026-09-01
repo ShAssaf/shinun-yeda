@@ -1538,13 +1538,44 @@ function signIn(){
 }
 function signOut(){ AUTH = null; authWrite(null); render(); }
 
+/* אימות הרשאה מול השרת. רשימת המורשים לא יושבת כאן בכוונה —
+   הקוד הזה ציבורי, והרשימה נשארת ב-ALLOWED_EMAILS בצד השרת. */
+const VERIFY_KEY = 'shinun-verified';
+function verifyAccess(force){
+  if(!CFG.explainUrl || !AUTH || !AUTH.access) return Promise.resolve();
+  let last = 0;
+  try{ last = +(localStorage.getItem(VERIFY_KEY) || 0); }catch(e){}
+  if(!force && Date.now() - last < 6*3600000) return Promise.resolve();  /* אחת לשש שעות */
+  return fetch(CFG.explainUrl, {
+    method:'POST',
+    headers:{'Content-Type':'application/json', Authorization:'Bearer ' + AUTH.access},
+    body: JSON.stringify({verify:true})
+  }).then(function(r){
+    if(r.status === 401){
+      return r.json().catch(function(){ return {}; }).then(function(j){
+        const who = AUTH.email || '';
+        AUTH = null; authWrite(null);
+        try{ localStorage.removeItem(VERIFY_KEY); }catch(e){}
+        view = {name:'home', lockErr:(j.error || 'החשבון אינו מורשה.') +
+                (who ? ' (' + who + ')' : '')};
+        render();
+      });
+    }
+    if(r.ok){ try{ localStorage.setItem(VERIFY_KEY, String(Date.now())); }catch(e){} }
+  }).catch(function(){});   /* אופליין — לא מנתקים */
+}
+
 function loadIdentity(){
   if(!AUTH || !AUTH.access || AUTH.email) return Promise.resolve();
   return fetch(CFG.supabaseUrl + '/auth/v1/user', {
     headers:{ apikey: CFG.supabaseKey, Authorization: 'Bearer ' + AUTH.access }
   }).then(function(r){ return r.ok ? r.json() : null; })
     .then(function(u){
-      if(u && u.email){ AUTH.email = u.email; authWrite(AUTH); render(); pullCards(); flushQueue(); return; }
+      if(u && u.email){
+        AUTH.email = u.email; authWrite(AUTH); render();
+        verifyAccess(true).then(function(){ if(AUTH){ pullCards(); flushQueue(); } });
+        return;
+      }
       /* אולי רק פג — מנסים לרענן לפני שמנתקים */
       return refreshToken().then(function(ok){
         if(!ok){ AUTH = null; authWrite(null); render(); }
@@ -1891,5 +1922,5 @@ document.addEventListener('keydown', function(e){
 
 render();
 if(authEnabled) loadIdentity();
-if(canSync()){ pullCards(); flushQueue(); }
+if(canSync()){ verifyAccess(false); pullCards(); flushQueue(); }
 </script>
