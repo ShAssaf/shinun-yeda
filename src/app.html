@@ -558,31 +558,214 @@ const REL = UI.rel || {};
 const ISO_PAIRS = DATA.isoPairs;
 
 /* ===========================================================
+   FSRS-6 — תזמון חזרות. הנוסחאות והמשקלים לקוחים מקוד הייחוס
+   open-spaced-repetition/py-fsrs, לא משוחזרים מהזיכרון.
+   מצב כרטיס: s יציבות בימים · d קושי 1..10 · due מתי להראות שוב.
+   =========================================================== */
+const FSRS_W = [0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001,
+                1.8722, 0.1666, 0.796, 1.4835, 0.0614, 0.2629, 1.6483, 0.6014,
+                1.8729, 0.5425, 0.0912, 0.0658, 0.1542];
+const FSRS_DECAY  = -FSRS_W[20];
+const FSRS_FACTOR = Math.pow(0.9, 1 / FSRS_DECAY) - 1;   /* כך ש-R(S,S)=0.9 */
+const RETENTION   = 0.9;      /* שיעור השימור שאליו מכוונים */
+const MAX_IVL     = 365;
+const DAY         = 86400000;
+const AGAIN_MS    = 600000;   /* טעות חוזרת בעוד עשר דקות, לא בעוד יום */
+
+const clampD = (d) => Math.min(10, Math.max(1, d));
+const clampS = (x) => Math.max(0.001, x);
+
+/* הסתברות להיזכר אחרי elapsed ימים */
+function retrievability(stability, elapsed){
+  return Math.pow(1 + FSRS_FACTOR * Math.max(0, elapsed) / stability, FSRS_DECAY);
+}
+function initialStability(g){ return clampS(FSRS_W[g - 1]); }
+function initialDifficulty(g, clamp){
+  const d = FSRS_W[4] - Math.exp(FSRS_W[5] * (g - 1)) + 1;
+  return clamp ? clampD(d) : d;
+}
+function nextDifficulty(d, g){
+  const delta  = -(FSRS_W[6] * (g - 3));
+  const damped = d + (10 - d) * delta / 9;              /* ריסון ליניארי */
+  const target = initialDifficulty(4, false);
+  return clampD(FSRS_W[7] * target + (1 - FSRS_W[7]) * damped);  /* נסיגה לממוצע */
+}
+function shortTermStability(s, g){
+  let inc = Math.exp(FSRS_W[17] * (g - 3 + FSRS_W[18])) * Math.pow(s, -FSRS_W[19]);
+  if(g >= 2) inc = Math.max(inc, 1);
+  return clampS(s * inc);
+}
+function recallStability(d, s, r, g){
+  const hard = g === 2 ? FSRS_W[15] : 1;
+  const easy = g === 4 ? FSRS_W[16] : 1;
+  return s * (1 + Math.exp(FSRS_W[8]) * (11 - d) * Math.pow(s, -FSRS_W[9]) *
+    (Math.exp((1 - r) * FSRS_W[10]) - 1) * hard * easy);
+}
+function forgetStability(d, s, r){
+  const long  = FSRS_W[11] * Math.pow(d, -FSRS_W[12]) *
+                (Math.pow(s + 1, FSRS_W[13]) - 1) * Math.exp((1 - r) * FSRS_W[14]);
+  const short = s / Math.exp(FSRS_W[17] * FSRS_W[18]);
+  return Math.min(long, short);
+}
+function nextInterval(s){
+  const iv = (s / FSRS_FACTOR) * (Math.pow(RETENTION, 1 / FSRS_DECAY) - 1);
+  return Math.min(MAX_IVL, Math.max(1, Math.round(iv)));
+}
+
+/* ציון 1..4 מתוך תשובה רב־ברירתית: נכונות, ומהירות כאינדיקציה לביטחון */
+function gradeOf(correct, ms){
+  if(!correct) return 1;
+  if(ms > 12000) return 2;
+  if(ms < 4000)  return 4;
+  return 3;
+}
+
+function reviewCard(st, g, now){
+  now = now || Date.now();
+  if(!st || st.s == null){
+    const s = initialStability(g);
+    return { s:s, d:initialDifficulty(g, true), last:now,
+             due: now + (g === 1 ? AGAIN_MS : nextInterval(s) * DAY),
+             reps:1, lapses: g === 1 ? 1 : 0 };
+  }
+  const elapsed = (now - st.last) / DAY;
+  const d = nextDifficulty(st.d, g);
+  let s;
+  if(elapsed < 1){
+    s = shortTermStability(st.s, g);                    /* חזרה באותו יום */
+  } else {
+    const r = retrievability(st.s, elapsed);
+    s = g === 1 ? forgetStability(st.d, st.s, r) : recallStability(st.d, st.s, r, g);
+  }
+  s = clampS(s);
+  return { s:s, d:d, last:now,
+           due: now + (g === 1 ? AGAIN_MS : nextInterval(s) * DAY),
+           reps:(st.reps || 0) + 1, lapses:(st.lapses || 0) + (g === 1 ? 1 : 0) };
+}
+
+/* ===========================================================
    התמדה
    =========================================================== */
+/* store מחזיק רק שיאים ומונה סבבים. היסטוריית הזיכרון עצמה
+   יושבת ב-CARDS ומסונכרנת ל-Supabase. */
 const KEY='bio-quiz-v2';
 function loadState(){
-  try{ const r=localStorage.getItem(KEY); return r?JSON.parse(r):{best:{},rounds:0,seen:{}}; }
-  catch(e){ return {best:{},rounds:0,seen:{}}; }
+  try{ const r=localStorage.getItem(KEY); return r?JSON.parse(r):{best:{},rounds:0}; }
+  catch(e){ return {best:{},rounds:0}; }
 }
 function saveState(s){ try{ localStorage.setItem(KEY,JSON.stringify(s)); }catch(e){} }
 let store = loadState();
 if(!store.best || typeof store.best!=='object') store.best={};
-if(!store.seen) store.seen={};
 
-function stat(key){ return store.seen[key] || {ok:0,no:0}; }
-function weightOf(key){
-  const s=stat(key);
-  return 1 + s.no*2.5 - Math.min(s.ok,4)*0.18;
+/* ===========================================================
+   מצב הכרטיסים — מראה מקומי ב-localStorage, מקור אמת ב-Supabase.
+   הכתיבה עוברת דרך תור, כדי שתרגול בלי רשת לא יאבד היסטוריה.
+   =========================================================== */
+const CARDS_KEY = 'shinun-cards', QUEUE_KEY = 'shinun-queue';
+function jread(k, fb){ try{ const r=localStorage.getItem(k); return r?JSON.parse(r):fb; }catch(e){ return fb; } }
+function jwrite(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+
+let CARDS = jread(CARDS_KEY, {});
+let QUEUE = jread(QUEUE_KEY, []);
+
+function restHeaders(){
+  return { apikey: CFG.supabaseKey, Authorization: 'Bearer ' + (AUTH && AUTH.access),
+           'Content-Type': 'application/json' };
 }
-/* בוחר פריטים, עם עדיפות לאלה שנכשלת בהם */
-function pickWeighted(items, n, keyFn){
-  const pool = shuffle(items);
-  pool.sort(function(a,b){ return weightOf(keyFn(b))-weightOf(keyFn(a)); });
-  return shuffle(pool.slice(0, Math.min(pool.length, n+6))).slice(0,n);
+function canSync(){ return !!(CFG.supabaseUrl && AUTH && AUTH.access); }
+
+function cardState(key){ return CARDS[key] || null; }
+
+function recordReview(key, st, grade, elapsedDays, ms){
+  CARDS[key] = st;
+  jwrite(CARDS_KEY, CARDS);
+  QUEUE.push({
+    card_key:key, stability:st.s, difficulty:st.d,
+    due:new Date(st.due).toISOString(), last_review:new Date(st.last).toISOString(),
+    reps:st.reps, lapses:st.lapses,
+    _log:{ card_key:key, rating:grade, elapsed_days:elapsedDays, duration_ms:ms }
+  });
+  jwrite(QUEUE_KEY, QUEUE);
+  flushQueue();
+}
+
+let flushing = false;
+function flushQueue(){
+  if(flushing || !QUEUE.length || !canSync()) return Promise.resolve();
+  flushing = true;
+  const batch = QUEUE.slice();
+  const rows = batch.map(function(r){ const c=Object.assign({},r); delete c._log; return c; });
+  const logs = batch.map(function(r){ return r._log; });
+  return fetch(CFG.supabaseUrl + '/rest/v1/card_state?on_conflict=user_id,card_key', {
+    method:'POST',
+    headers: Object.assign(restHeaders(), {Prefer:'resolution=merge-duplicates,return=minimal'}),
+    body: JSON.stringify(rows)
+  }).then(function(r){
+    if(!r.ok) throw new Error('sync ' + r.status);
+    return fetch(CFG.supabaseUrl + '/rest/v1/review_log', {
+      method:'POST',
+      headers: Object.assign(restHeaders(), {Prefer:'return=minimal'}),
+      body: JSON.stringify(logs)
+    });
+  }).then(function(){
+    QUEUE = QUEUE.slice(batch.length);
+    jwrite(QUEUE_KEY, QUEUE);
+  }).catch(function(){
+    /* נשאר בתור וינוסה שוב בטעינה הבאה או בתשובה הבאה */
+  }).then(function(){ flushing = false; });
+}
+
+/* משיכת המצב מהשרת — מאחדת עם המקומי לפי last_review המאוחר יותר,
+   כך שמכשיר שתרגל אופליין לא נדרס וגם לא דורס. */
+function pullCards(){
+  if(!canSync()) return Promise.resolve();
+  return fetch(CFG.supabaseUrl +
+      '/rest/v1/card_state?select=card_key,stability,difficulty,due,last_review,reps,lapses',
+      { headers: restHeaders() })
+    .then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(rows){
+      if(!rows) return;
+      let changed = false;
+      rows.forEach(function(row){
+        const remote = { s:row.stability, d:row.difficulty,
+                         due:Date.parse(row.due), last:Date.parse(row.last_review),
+                         reps:row.reps, lapses:row.lapses };
+        const local = CARDS[row.card_key];
+        if(!local || remote.last > local.last){ CARDS[row.card_key] = remote; changed = true; }
+      });
+      if(changed){ jwrite(CARDS_KEY, CARDS); render(); }
+    }).catch(function(){});
+}
+
+/* ===========================================================
+   מתזמן — מרכיב סבב מכרטיסים שהגיע זמנם, ואז חדשים,
+   ואז אלה שהכי קרובים להישכח.
+   =========================================================== */
+function dueCount(items, keyFn){
+  const now = Date.now();
+  return items.filter(function(it){
+    const st = cardState(keyFn(it));
+    return !st || st.due <= now;
+  }).length;
 }
 function masteredCount(items, keyFn){
-  return items.filter(function(it){ const s=stat(keyFn(it)); return s.ok>=2 && s.ok>s.no; }).length;
+  /* "נשלט" = יציבות של שלושה שבועות ומעלה */
+  return items.filter(function(it){
+    const st = cardState(keyFn(it));
+    return st && st.s >= 21;
+  }).length;
+}
+
+function pickWeighted(items, n, keyFn){
+  const now = Date.now();
+  const ranked = shuffle(items).map(function(it){
+    const st = cardState(keyFn(it));
+    if(!st)            return {it:it, group:1, order:0};                 /* חדש */
+    if(st.due <= now)  return {it:it, group:0, order:st.due};            /* הגיע זמנו */
+    return {it:it, group:2, order:retrievability(st.s, (now - st.last)/DAY)};
+  });
+  ranked.sort(function(a,b){ return a.group - b.group || a.order - b.order; });
+  return ranked.slice(0, n).map(function(x){ return x.it; });
 }
 
 /* ===========================================================
@@ -844,9 +1027,16 @@ function answer(optId){
   if(q.answered) return;
   q.answered = optId;
   const ok = optId===q.answer;
-  const s = store.seen[q.key] || (store.seen[q.key]={ok:0,no:0});
-  if(ok){ quiz.correct++; s.ok++; } else { s.no++; quiz.misses.push(q); }
-  saveState(store);
+  if(ok) quiz.correct++; else quiz.misses.push(q);
+
+  const ms    = q.shownAt ? Date.now() - q.shownAt : 0;
+  const grade = gradeOf(ok, ms);
+  const prev  = cardState(q.key);
+  const elapsedDays = prev ? (Date.now() - prev.last) / DAY : null;
+  const st    = reviewCard(prev, grade);
+  q.interval  = Math.round((st.due - Date.now()) / DAY);
+  recordReview(q.key, st, grade, elapsedDays, ms);
+
   render();
   if(ok) setTimeout(function(){ if(quiz && quiz.qs[quiz.i]===q) next(); }, 850);
 }
@@ -876,31 +1066,28 @@ function icon(kind){
 
 function renderHome(){
   const cards = DECKS.map(function(d){
-    const m = masteredCount(d.items, d.keyFn);
+    const due = dueCount(d.items, d.keyFn);
     return '<button class="deck-card" data-deck="'+d.id+'">'+
       '<span class="dot" style="background:'+d.color+'"></span>'+
       '<span class="txt"><strong>'+esc(d.title)+'</strong><span>'+esc(d.sub)+'</span></span>'+
-      '<span class="prog"><b>'+m+'</b>/'+d.items.length+'</span>'+
+      '<span class="prog"><b>'+due+'</b>לחזרה</span>'+
     '</button>';
   }).join('');
 
   const totalMastered = DECKS.reduce(function(a,d){ return a+masteredCount(d.items,d.keyFn); },0);
+  const totalDue = DECKS.reduce(function(a,d){ return a+dueCount(d.items,d.keyFn); },0);
   const totalItems = DECKS.reduce(function(a,d){ return a+d.items.length; },0);
-  const bestAvg = (function(){
-    const vals = DECKS.map(function(d){ return store.best[d.id]||0; }).filter(function(v){return v>0;});
-    return vals.length ? Math.round(vals.reduce(function(a,b){return a+b;},0)/vals.length) : 0;
-  })();
 
   app.innerHTML =
   '<div class="home-wrap">'+
     '<header>'+
       '<div class="eyebrow">ביוכימיה · הכנה למבחן</div>'+
       '<h1>שינון</h1>'+
-      '<p class="lede">חבילות תרגול קצרות. כל סבב '+ROUND+' שאלות, וכל מה שנכשלת בו חוזר.</p>'+
+      '<p class="lede">חזרה מרווחת. כל כרטיס חוזר בדיוק לפני שהיית שוכח אותו.</p>'+
     '</header>'+
     '<div class="stats-row">'+
+      '<div class="stat"><b dir="ltr">'+totalDue+'</b><span>לחזרה עכשיו</span></div>'+
       '<div class="stat"><b dir="ltr">'+totalMastered+'<span style="font-size:14px;color:var(--ink-2)">/'+totalItems+'</span></b><span>נשלטים</span></div>'+
-      '<div class="stat"><b>'+bestAvg+'%</b><span>ממוצע שיאים</span></div>'+
       '<div class="stat"><b>'+(store.rounds||0)+'</b><span>סבבים</span></div>'+
     '</div>'+
     '<div class="deck-list">'+cards+'</div>'+
@@ -929,6 +1116,7 @@ function renderHome(){
 function renderDeck(){
   const d = deckById(view.deck);
   const m = masteredCount(d.items, d.keyFn);
+  const due = dueCount(d.items, d.keyFn);
   const modes = d.modes.map(function(mo){
     return '<button class="mode" data-mode="'+mo.id+'">'+
       '<span class="glyph">'+esc(mo.glyph)+'</span>'+
@@ -943,12 +1131,12 @@ function renderDeck(){
   '<div class="bar">'+
     '<button class="icon-btn" id="homeBtn" aria-label="חזרה">'+icon('home')+'</button>'+
     '<div class="title">'+esc(d.title)+'</div>'+
-    '<div class="count">'+m+'/'+d.items.length+' נשלטים</div>'+
+    '<div class="count">'+due+' לחזרה · '+m+' נשלטים</div>'+
   '</div>'+
   '<div class="deck-wrap">'+
     '<div class="panel">'+
       '<div class="panel-head"><div class="panel-title">בחר סוג תרגול</div>'+
-      '<div class="panel-meta">שיא '+(store.best[d.id]||0)+'%</div></div>'+
+      '<div class="panel-meta">'+d.items.length+' כרטיסים</div></div>'+
       '<div class="modes">'+modes+'</div>'+
       '<div class="legend">'+legend+'</div>'+
     '</div>'+
@@ -981,6 +1169,7 @@ function promptHTML(p){
 function renderQuiz(){
   const q = quiz.qs[quiz.i];
   const answered = !!q.answered;
+  if(!answered && !q.shownAt) q.shownAt = Date.now();   /* למדידת ביטחון */
   const ok = answered && q.answered===q.answer;
   const correctOpt = q.options.filter(function(o){ return o.id===q.answer; })[0];
 
@@ -1008,8 +1197,11 @@ function renderQuiz(){
   let fb='<div class="feedback hide"></div>';
   if(answered){
     const name = correctOpt ? correctOpt.main : '';
+    const back = q.interval >= 1
+      ? ' · חוזר בעוד ' + q.interval + (q.interval === 1 ? ' יום' : ' ימים')
+      : ' · חוזר בקרוב';
     if(ok){
-      fb = '<div class="feedback ok"><span class="fb-txt">נכון'+(q.why?' — '+esc(q.why):'')+'</span></div>';
+      fb = '<div class="feedback ok"><span class="fb-txt">נכון'+(q.why?' — '+esc(q.why):'')+back+'</span></div>';
     } else {
       fb = '<div class="feedback bad"><span class="fb-txt">התשובה: <b'+(correctOpt&&correctOpt.ltr?' class="ltr"':'')+'>'+
         esc(name)+'</b>'+(q.why?' · '+esc(q.why):'')+'</span>'+
@@ -1151,7 +1343,7 @@ function loadIdentity(){
     headers:{ apikey: CFG.supabaseKey, Authorization: 'Bearer ' + AUTH.access }
   }).then(function(r){ return r.ok ? r.json() : null; })
     .then(function(u){
-      if(u && u.email){ AUTH.email = u.email; authWrite(AUTH); render(); return; }
+      if(u && u.email){ AUTH.email = u.email; authWrite(AUTH); render(); pullCards(); flushQueue(); return; }
       /* אולי רק פג — מנסים לרענן לפני שמנתקים */
       return refreshToken().then(function(ok){
         if(!ok){ AUTH = null; authWrite(null); render(); }
@@ -1420,4 +1612,5 @@ document.addEventListener('keydown', function(e){
 
 render();
 if(authEnabled) loadIdentity();
+if(canSync()){ pullCards(); flushQueue(); }
 </script>
