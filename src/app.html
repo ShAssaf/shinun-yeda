@@ -1128,7 +1128,7 @@ function signIn(){
 function signOut(){ AUTH = null; authWrite(null); render(); }
 
 function loadIdentity(){
-  if(!AUTH || AUTH.viaPass || !AUTH.access || AUTH.email) return Promise.resolve();
+  if(!AUTH || !AUTH.access || AUTH.email) return Promise.resolve();
   return fetch(CFG.supabaseUrl + '/auth/v1/user', {
     headers:{ apikey: CFG.supabaseKey, Authorization: 'Bearer ' + AUTH.access }
   }).then(function(r){ return r.ok ? r.json() : null; })
@@ -1156,28 +1156,22 @@ function refreshToken(){
     }).catch(function(){ return false; });
 }
 
-/* קריאה לפונקציה — טוקן אם מחובר, סיסמה כגיבוי. מרענן פעם אחת על 401. */
-function callFn(url, payload, pass, retried){
+/* קריאה לפונקציה עם טוקן המשתמש. מרענן פעם אחת על 401. */
+function callFn(url, payload, retried){
   const headers = {'Content-Type':'application/json'};
   if(AUTH && AUTH.access) headers.Authorization = 'Bearer ' + AUTH.access;
-  const body = Object.assign({}, payload);
-  if(pass) body.passphrase = pass;
-  return fetch(url, {method:'POST', headers:headers, body:JSON.stringify(body)})
+  return fetch(url, {method:'POST', headers:headers, body:JSON.stringify(payload)})
     .then(function(r){
       if(r.status===401 && AUTH && AUTH.refresh && !retried){
         return refreshToken().then(function(ok){
           if(!ok) return r.json().then(function(j){ return {ok:false, status:401, body:j}; });
-          return callFn(url, payload, pass, true);
+          return callFn(url, payload, true);
         });
       }
       return r.json().then(function(j){ return {ok:r.ok, status:r.status, body:j}; })
               .catch(function(){ return {ok:r.ok, status:r.status, body:{}}; });
     });
 }
-
-const PASS_KEY = 'shinun-pass';
-function getPass(){ try{ return localStorage.getItem(PASS_KEY)||''; }catch(e){ return ''; } }
-function setPass(v){ try{ localStorage.setItem(PASS_KEY, v); }catch(e){} }
 
 const EXAMPLES = [
   'תוסיף שאלה על הקבוצה הפוספודיאסטר',
@@ -1188,7 +1182,6 @@ const EXAMPLES = [
 function openAddSheet(){
   const bg = document.createElement('div');
   bg.className = 'sheet-bg';
-  const hasPass = !!getPass();
   bg.innerHTML =
     '<div class="sheet" role="dialog" aria-modal="true" aria-label="הוספת שאלה">'+
       '<div class="sheet-head"><h2>הוסף שאלה או תיקון</h2>'+
@@ -1204,12 +1197,7 @@ function openAddSheet(){
           '<option value="auto">שיקבע לבד</option>'+
           DECKS.map(function(d){ return '<option value="'+d.id+'">'+esc(d.title)+'</option>'; }).join('')+
         '</select></div>'+
-      (authEnabled && !AUTH
-        ? '<button class="gbtn" id="addGoogle">'+icon('google')+' התחברות עם גוגל</button>'
-        : (hasPass || AUTH ? '' :
-           '<div><label for="addPass">סיסמה</label>'+
-           '<input id="addPass" type="password" autocomplete="off" placeholder="נשמרת במכשיר, פעם אחת"></div>'))+
-      (authEnabled && !AUTH ? '' : '<button class="send" id="addSend">שלח</button>')+
+      '<button class="send" id="addSend">שלח</button>'+
       '<div class="status" id="addStatus" hidden></div>'+
     '</div>';
   document.body.appendChild(bg);
@@ -1229,25 +1217,16 @@ function openAddSheet(){
 
   function say(cls, msg){ status.hidden=false; status.className='status '+cls; status.textContent=msg; }
 
-  const gb = bg.querySelector('#addGoogle');
-  if(gb) gb.addEventListener('click', signIn);
-  if(!send) return;
-
   send.addEventListener('click', function(){
     const body = txt.value.trim();
     if(!body){ say('bad','צריך לכתוב מה להוסיף.'); txt.focus(); return; }
-    const passInput = bg.querySelector('#addPass');
-    const pass = passInput ? passInput.value.trim() : getPass();
-    if(!AUTH && !pass){ say('bad','צריך להתחבר.'); return; }
-
     send.disabled = true;
     say('work','Claude כותב את הפריט ומעדכן את התוכן…');
     callFn(CFG.addQuestionUrl,
-      { request:body, deck:bg.querySelector('#addDeck').value }, pass
+      { request:body, deck:bg.querySelector('#addDeck').value }
     ).then(function(res){
       if(res.status===401){ say('bad', res.body.error || 'ההתחברות נדחתה.'); send.disabled=false; return; }
       if(!res.ok){ say('bad', res.body.error || ('השרת החזיר '+res.status)); send.disabled=false; return; }
-      if(passInput && pass) setPass(pass);
       say('ok', (res.body.summary || 'נוסף.') + ' האתר נבנה מחדש — רענן בעוד כדקה.');
       send.textContent = 'רענן עכשיו';
       send.disabled = false;
@@ -1277,34 +1256,23 @@ function renderLab(){
     '<div><label for="labTxt">מה לשנות</label>'+
       '<textarea id="labTxt" placeholder="למשל: תגדיל את המבנה במסך השאלה · תוסיף מונה זמן לכל סבב · תשנה את צבע ההדגשה לכחול"'+
       (busy?' disabled':'')+'>'+esc(view.draft||'')+'</textarea></div>'+
-    (authEnabled && !AUTH
-      ? '<button class="gbtn" id="labGoogle">'+icon('google')+' התחברות עם גוגל</button>'
-      : (getPass() || AUTH ? '' :
-         '<div><label for="labPass">סיסמה</label><input id="labPass" type="password" autocomplete="off"></div>'))+
-    (authEnabled && !AUTH ? '' :
-      '<button class="send" id="labSend"'+(busy?' disabled':'')+'>'+(busy?'עובד…':'שלח')+'</button>'+
-      '<button class="undo" id="labUndo"'+(busy?' disabled':'')+'>בטל את השינוי האחרון</button>')+
+    '<button class="send" id="labSend"'+(busy?' disabled':'')+'>'+(busy?'עובד…':'שלח')+'</button>'+
+    '<button class="undo" id="labUndo"'+(busy?' disabled':'')+'>בטל את השינוי האחרון</button>'+
     (view.msg ? '<div class="lab-status '+view.cls+'">'+esc(view.msg)+'</div>' : '')+
   '</div>';
 
   app.querySelector('#backBtn').addEventListener('click', function(){ view={name:'home'}; render(); });
   const txt = app.querySelector('#labTxt');
-  const gb2 = app.querySelector('#labGoogle');
-  if(gb2) gb2.addEventListener('click', signIn);
 
   function call(payload, working){
-    const passInput = app.querySelector('#labPass');
-    const pass = passInput ? passInput.value.trim() : getPass();
-    if(!AUTH && !pass){ view.msg='צריך להתחבר.'; view.cls='bad'; render(); return; }
     view.busy = true; view.msg = working; view.cls='work';
     view.draft = txt ? txt.value : view.draft;
     render();
-    callFn(CFG.editAppUrl, payload, pass).then(function(res){
+    callFn(CFG.editAppUrl, payload).then(function(res){
       view.busy = false;
       if(res.status===401){ view.msg = res.body.error || 'ההתחברות נדחתה.'; view.cls='bad'; }
       else if(!res.ok){ view.msg = res.body.error || ('השרת החזיר '+res.status); view.cls='bad'; }
       else{
-        if(passInput && pass) setPass(pass);
         view.draft = '';
         view.msg = (res.body.summary||'בוצע') + ' — ' +
           (res.body.note || 'הבנייה רצה. רענן בעוד כדקה כדי לראות את התוצאה.');
@@ -1316,9 +1284,7 @@ function renderLab(){
     });
   }
 
-  const sendBtn = app.querySelector('#labSend');
-  if(!sendBtn) return;
-  sendBtn.addEventListener('click', function(){
+  app.querySelector('#labSend').addEventListener('click', function(){
     const body = txt.value.trim();
     if(!body){ view.msg='צריך לכתוב מה לשנות.'; view.cls='bad'; render(); return; }
     call({request:body}, 'Claude קורא את הקוד ומכין את השינוי…');
@@ -1332,11 +1298,8 @@ function renderLab(){
    מסך נעילה — האפליקציה כולה מאחורי התחברות.
    השער כאן הוא נוכחות טוקן שמור, לא אימות חי, כדי שהתרגול
    ימשיך לעבוד אופליין. האימות האמיתי קורה בשרת בכל עריכה.
-   מסלול הסיסמה קיים כי גוגל חוסמת OAuth בתוך WebView מוטמע,
-   כלומר בתוך ה-APK.
    =========================================================== */
 function renderLock(){
-  const showPass = view.lockPass || false;
   app.innerHTML =
   '<div class="lock">'+
     '<header>'+
@@ -1345,50 +1308,9 @@ function renderLock(){
       '<p class="lede">התחבר כדי להיכנס.</p>'+
     '</header>'+
     (view.lockErr ? '<div class="err">'+esc(view.lockErr)+'</div>' : '')+
-    (showPass
-      ? '<input id="lockPass" type="password" autocomplete="current-password" placeholder="סיסמה">'+
-        '<button class="send" id="lockGo"'+(view.lockBusy?' disabled':'')+'>'+
-          (view.lockBusy?'בודק…':'כניסה')+'</button>'+
-        '<button class="alt" id="lockToggle">חזרה להתחברות עם גוגל</button>'
-      : '<button class="gbtn" id="lockGoogle">'+icon('google')+' התחברות עם גוגל</button>'+
-        '<button class="alt" id="lockToggle">כניסה עם סיסמה</button>')+
+    '<button class="gbtn" id="lockGoogle">'+icon('google')+' התחברות עם גוגל</button>'+
   '</div>';
-
-  const tg = app.querySelector('#lockToggle');
-  tg.addEventListener('click', function(){
-    view.lockPass = !showPass; view.lockErr = null; render();
-  });
-  const gg = app.querySelector('#lockGoogle');
-  if(gg) gg.addEventListener('click', signIn);
-
-  const go = app.querySelector('#lockGo');
-  if(go) go.addEventListener('click', function(){
-    const pass = app.querySelector('#lockPass').value.trim();
-    if(!pass){ view.lockErr='צריך סיסמה.'; render(); return; }
-    view.lockBusy = true; view.lockErr = null; render();
-    /* אימות מול השרת — check אינו כותב דבר ואינו צורך טוקנים */
-    fetch(CFG.addQuestionUrl, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({passphrase:pass, check:true})
-    }).then(function(r){
-      view.lockBusy = false;
-      if(r.status===401){ view.lockErr='סיסמה שגויה.'; render(); return; }
-      if(!r.ok){ view.lockErr='השרת החזיר '+r.status; render(); return; }
-      setPass(pass);
-      AUTH = {access:null, refresh:null, email:'סיסמה', viaPass:true};
-      authWrite(AUTH);
-      view = {name:'home'};
-      render();
-    }).catch(function(err){
-      view.lockBusy = false; view.lockErr = 'לא הצלחתי להתחבר: '+err.message; render();
-    });
-  });
-
-  const inp = app.querySelector('#lockPass');
-  if(inp){
-    inp.focus();
-    inp.addEventListener('keydown', function(e){ if(e.key==='Enter') go.click(); });
-  }
+  app.querySelector('#lockGoogle').addEventListener('click', signIn);
 }
 
 function render(){

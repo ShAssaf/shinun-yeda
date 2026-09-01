@@ -26,7 +26,7 @@ const dom = new JSDOM(html, {
     w.scrollTo = () => {};   /* jsdom מגדיר stub שזורק, אז דורסים אותו */
     /* האפליקציה חסומה מאחורי התחברות — מזריקים מפגש כדי לבדוק את מה שמאחוריו */
     try { w.localStorage.setItem('shinun-auth',
-      JSON.stringify({ access: null, refresh: null, email: 'smoke@test', viaPass: true })); } catch {}
+      JSON.stringify({ access: 'smoke-token', refresh: 'smoke-refresh', email: 'smoke@test' })); } catch {}
   },
 });
 const win = dom.window;
@@ -98,7 +98,6 @@ try {
   if (authOn) {
     check(!!d.querySelector('.lock'), 'מסך הנעילה לא נרנדר ללא מפגש');
     check(!!d.querySelector('#lockGoogle'), 'אין כפתור התחברות עם גוגל');
-    check(!!d.querySelector('#lockToggle'), 'אין מסלול סיסמה חלופי');
     check(!d.querySelector('.deck-list'), 'התוכן דלף אל מסך הנעילה');
   }
   locked.window.close();
