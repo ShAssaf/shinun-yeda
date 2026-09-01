@@ -9,10 +9,13 @@
     "build": "node tools/build.mjs",
     "serve": "node tools/serve.mjs",
     "sync": "npm run build && npx cap sync android",
-    "apk": "npm run sync && cd android && ./gradlew assembleDebug"
+    "apk": "npm run sync && cd android && ./gradlew assembleDebug",
+    "smoke": "node tools/smoke.mjs",
+    "check": "node tools/build.mjs && node tools/smoke.mjs"
   },
   "devDependencies": {
-    "@capacitor/cli": "^7.0.0"
+    "@capacitor/cli": "^7.0.0",
+    "jsdom": "^30.0.1"
   },
   "dependencies": {
     "@capacitor/android": "^7.0.0",

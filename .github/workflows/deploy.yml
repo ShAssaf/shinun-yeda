@@ -24,6 +24,9 @@ jobs:
         with:
           node-version: '22'
 
+      - name: תלויות
+        run: npm ci --no-audit --no-fund
+
       - name: הטמעת גופנים
         run: node tools/embed-fonts.mjs
 
@@ -32,6 +35,9 @@ jobs:
 
       - name: בנייה
         run: node tools/build.mjs
+
+      - name: בדיקת עשן — אם נכשלת, לא מדפלויים
+        run: node tools/smoke.mjs
 
       - uses: actions/configure-pages@v5
 

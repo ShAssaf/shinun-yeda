@@ -19,7 +19,7 @@ const CORS = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const DECK_KEYS = ['groups', 'elements', 'iso', 'isoTerms', 'isoPairs', 'ui'] as const;
+const DECK_KEYS = ['groups', 'elements', 'iso', 'isoTerms', 'isoPairs', 'topics', 'ui'] as const;
 type DeckKey = typeof DECK_KEYS[number];
 
 const REL_KEYS = ['chain', 'position', 'functional', 'geometric',
@@ -104,6 +104,27 @@ function validateItem(deck: DeckKey, item: Record<string, unknown>, i: number, e
   }
 }
 
+const MAX_CARDS = 200;
+
+function validateTopic(item: Record<string, unknown>, i: number, errs: string[]) {
+  const path = `topics[${i}]`;
+  str(item, 'title', path, errs);
+  const cards = item.cards;
+  if (!Array.isArray(cards) || !cards.length) { errs.push(`${path}.cards ריק`); return; }
+  if (cards.length > MAX_CARDS) errs.push(`${path}.cards יותר מ-${MAX_CARDS} כרטיסים`);
+  const seen = new Set<string>();
+  cards.forEach((c, j) => {
+    const card = c as Record<string, unknown>;
+    const cp = `${path}.cards[${j}]`;
+    if (typeof card.id !== 'string' || !/^[a-z0-9][a-z0-9-]{1,40}$/.test(card.id))
+      errs.push(`${cp}.id חייב להיות slug באנגלית קטנה`);
+    else if (seen.has(card.id)) errs.push(`${cp}.id כפול`);
+    else seen.add(card.id);
+    str(card, 'front', cp, errs);
+    str(card, 'back', cp, errs);
+  });
+}
+
 /* עריכת תווית ממשק — רק מפתחות שכבר קיימים, ורק מחרוזות */
 function getPath(obj: unknown, path: string): unknown {
   return path.split('.').reduce<unknown>(
@@ -149,6 +170,16 @@ ui — תוויות הממשק (טקסט בלבד, לא תוכן לימודי). 
   נתיבים זמינים: cats.<hc|ox|n|s|p> · rel.<chain|position|functional|geometric|enantiomers|diastereomers|conformers|same>
   decks.<fg|el|iso>.title · .sub · .modes.<id>.title · .modes.<id>.desc · .legend.<key>
   ב-ui תמיד mode="replace". אי אפשר להוסיף נתיב חדש, רק לשנות ערך של נתיב קיים.
+
+topics — חבילת נושא חופשית. **זה היעד לכל נושא שאינו קבוצה פונקציונלית, יסוד או איזומריה**:
+  ביולוגיה של התא, מסלולים מטבוליים, אנזימולוגיה, פרמקולוגיה, ויטמינים — הכול.
+  אל תסרב לבקשה בטענה שאין חבילה מתאימה. אם אין — צור חבילת נושא חדשה.
+  פריט: {"id":"microtubules","title":"מיקרוטובולים","sub":"שלד התא",
+          "cards":[{"id":"tubulin","front":"טובולין","frontSub":"Tubulin",
+                    "back":"דימר α/β שממנו נבנה המיקרוטובול","note":"הערה אופציונלית"}]}
+  front הוא המושג, back הוא ההסבר. נדרשים לפחות 4 כרטיסים כדי שהחבילה תופיע.
+  mode="add" ליצירת חבילה חדשה, mode="replace" להוספת כרטיסים או תיקון בחבילה קיימת
+  (הכרטיסים ממוזגים לפי id — קיים מוחלף, חדש נוסף).
 
 isoPairs — זוג מבנים לזיהוי היחס:
   id, rel (chain|position|functional|geometric|enantiomers|diastereomers|conformers|same),
@@ -322,7 +353,30 @@ Deno.serve(async (req) => {
 
     const errs: string[] = [];
 
-    if (patch.deck === 'ui') {
+    if (patch.deck === 'topics') {
+      items.forEach((it, i) => validateTopic(it, i, errs));
+      if (typeof items[0]?.id !== 'string' || !/^[a-z0-9][a-z0-9-]{1,40}$/.test(items[0].id as string))
+        errs.push('topics[0].id חייב להיות slug באנגלית קטנה');
+      if (errs.length) return json({ error: 'לא עבר אימות: ' + errs.slice(0, 4).join(' · ') }, 422);
+
+      current.topics ??= [];
+      for (const t of items) {
+        const found = (current.topics as Record<string, unknown>[]).find((x) => x.id === t.id);
+        if (!found) { current.topics.push(t); continue; }
+        /* מיזוג כרטיסים לפי id — קיים מוחלף, חדש נוסף */
+        const cards = found.cards as Record<string, unknown>[];
+        for (const c of t.cards as Record<string, unknown>[]) {
+          const k = cards.findIndex((x) => x.id === c.id);
+          if (k >= 0) cards[k] = c; else cards.push(c);
+        }
+        if (t.title) found.title = t.title;
+        if (t.sub) found.sub = t.sub;
+      }
+      const short = (current.topics as { title: string; cards: unknown[] }[])
+        .filter((t) => t.cards.length < 4).map((t) => t.title);
+      if (short.length)
+        return json({ error: `חבילה זקוקה ל-4 כרטיסים לפחות. חסרים ב: ${short.join(', ')}` }, 422);
+    } else if (patch.deck === 'ui') {
       if (patch.mode !== 'replace') errs.push('בתוויות ממשק אפשר רק mode="replace"');
       items.forEach((it, i) => validateLabel(current.ui, it, i, errs));
       if (errs.length) return json({ error: 'לא עבר אימות: ' + errs.slice(0, 4).join(' · ') }, 422);

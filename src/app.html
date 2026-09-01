@@ -327,7 +327,8 @@ h1{
   m.content='width=device-width, initial-scale=1, viewport-fit=cover';
   var t=document.querySelector('meta[name="theme-color"]');
   if(!t){ t=document.createElement('meta'); t.name='theme-color'; document.head.appendChild(t); }
-  t.content=matchMedia('(prefers-color-scheme: dark)').matches?'#0B1312':'#EFF3F2';
+  const dark = typeof matchMedia==='function' && matchMedia('(prefers-color-scheme: dark)').matches;
+  t.content = dark ? '#0B1312' : '#EFF3F2';
   var c=document.createElement('meta');
   c.name='apple-mobile-web-app-capable'; c.content='yes'; document.head.appendChild(c);
 })();
@@ -676,6 +677,57 @@ const DECKS = [
   }
 },
 ];
+
+/* ===========================================================
+   חבילות נושא — כרטיסים גנריים, בלי קוד ייעודי לכל נושא.
+   כרטיס: {id, front, frontSub, back, note}
+   =========================================================== */
+const TOPICS = DATA.topics || [];
+const TOPIC_COLORS = ['var(--c-n)','var(--c-o)','var(--c-p)','var(--c-s)','var(--c-x)'];
+
+function topicQuestion(topic, mode){
+  const card = topicQuestion.pool.shift();
+  const dir = mode==='mix' ? (Math.random()<0.5?'f2b':'b2f') : mode;
+  const foils = sample(topic.cards.filter(function(c){ return c.id!==card.id; }), 3);
+  const opts = shuffle([card].concat(foils));
+  const key = 'tp:'+topic.id+':'+card.id;
+
+  if(dir==='b2f'){
+    return { key:key, label:'לאיזה מושג זה שייך?',
+      prompt:{kind:'text', main:card.back},
+      optionKind:'text',
+      options:opts.map(function(o){ return {id:o.id, main:o.front, sub:o.frontSub||''}; }),
+      answer:card.id, why:card.note||null };
+  }
+  return { key:key, label:'מה זה?',
+    prompt:{kind:'text', main:card.front, sub:card.frontSub||''},
+    optionKind:'text',
+    options:opts.map(function(o){ return {id:o.id, main:o.back}; }),
+    answer:card.id, why:card.note||null };
+}
+
+/* חבילת נושא זקוקה לארבעה כרטיסים לפחות כדי לייצר ארבע אפשרויות */
+TOPICS.filter(function(t){ return t && Array.isArray(t.cards) && t.cards.length>=4; })
+  .forEach(function(t, i){
+    DECKS.push({
+      id:'tp-'+t.id, title:t.title, sub:t.sub || (t.cards.length+' כרטיסים'),
+      color:t.color || TOPIC_COLORS[i % TOPIC_COLORS.length],
+      items:t.cards, keyFn:function(c){ return 'tp:'+t.id+':'+c.id; },
+      modes:[
+        {id:'f2b', glyph:'→', title:'מושג ← הסבר', desc:'רואה מושג, בוחר את ההסבר'},
+        {id:'b2f', glyph:'←', title:'הסבר ← מושג', desc:'רואה הסבר, בוחר את המושג'},
+        {id:'mix', glyph:'⇄', title:'מעורב', desc:'שני הכיוונים באקראי'},
+      ],
+      legend:[{color:t.color || TOPIC_COLORS[i % TOPIC_COLORS.length], he:t.title}],
+      build:function(mode){
+        const n = Math.min(ROUND, t.cards.length);
+        topicQuestion.pool = pickWeighted(t.cards, n, function(c){ return 'tp:'+t.id+':'+c.id; });
+        const out=[]; for(let k=0;k<n;k++) out.push(topicQuestion(t, mode));
+        return out;
+      },
+    });
+  });
+
 function deckById(id){ return DECKS.filter(function(d){return d.id===id;})[0]; }
 
 /* ===========================================================
