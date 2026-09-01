@@ -1,0 +1,21 @@
+{
+  "name": "shinun-biochem",
+  "version": "1.0.0",
+  "private": true,
+  "description": "אפליקציית שינון לביוכימיה — קבוצות פונקציונליות, יסודות, איזומרים",
+  "scripts": {
+    "icons": "python3 tools/make-icons.py",
+    "fonts": "node tools/embed-fonts.mjs",
+    "build": "node tools/build.mjs",
+    "serve": "node tools/serve.mjs",
+    "sync": "npm run build && npx cap sync android",
+    "apk": "npm run sync && cd android && ./gradlew assembleDebug"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.0.0"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/core": "^7.0.0"
+  }
+}

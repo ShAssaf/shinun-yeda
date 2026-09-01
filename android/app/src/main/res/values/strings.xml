@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">שינון ביוכימיה</string>
+    <string name="title_activity_main">שינון ביוכימיה</string>
+    <string name="package_name">il.shlomo.shinun</string>
+    <string name="custom_url_scheme">il.shlomo.shinun</string>
+</resources>

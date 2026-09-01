@@ -1,0 +1,1060 @@
+<title>שינון ביוכימיה</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700&family=Heebo:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+:root{
+  --bg:#EFF3F2; --surface:#FFFFFF; --surface-2:#E4EAE9; --ink:#131C1B; --ink-2:#596967;
+  --line:#D2DBD9; --line-2:#BCC8C6;
+  --accent:#0E7C72; --on-accent:#FFFFFF;
+  --c-o:#CF6F2B; --c-n:#3A76BE; --c-s:#B2900F; --c-p:#A5713C; --c-c:#131C1B; --c-x:#8A4B9E;
+  --ok:#1C8555; --ok-bg:#E1F1E9; --bad:#BC4028; --bad-bg:#F8E5E1;
+  --shadow:0 1px 2px rgba(19,28,27,.06), 0 8px 24px -12px rgba(19,28,27,.18);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0B1312; --surface:#141F1D; --surface-2:#1D2A28; --ink:#E9F0EE; --ink-2:#93A5A2;
+    --line:#283634; --line-2:#3A4B48;
+    --accent:#41BAAA; --on-accent:#06201D;
+    --c-o:#EFA262; --c-n:#82B2EE; --c-s:#DFC44B; --c-p:#D3A374; --c-c:#E9F0EE; --c-x:#C48FD8;
+    --ok:#4FCB8E; --ok-bg:#122E24; --bad:#F27A5F; --bad-bg:#331A15;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 28px -14px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0B1312; --surface:#141F1D; --surface-2:#1D2A28; --ink:#E9F0EE; --ink-2:#93A5A2;
+  --line:#283634; --line-2:#3A4B48;
+  --accent:#41BAAA; --on-accent:#06201D;
+  --c-o:#EFA262; --c-n:#82B2EE; --c-s:#DFC44B; --c-p:#D3A374; --c-c:#E9F0EE; --c-x:#C48FD8;
+  --ok:#4FCB8E; --ok-bg:#122E24; --bad:#F27A5F; --bad-bg:#331A15;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 28px -14px rgba(0,0,0,.7);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Heebo","Helvetica Neue",Arial,sans-serif;
+  -webkit-text-size-adjust:100%; direction:rtl;
+}
+button{font:inherit;color:inherit;background:none;border:none;padding:0;cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+
+.app{
+  max-width:520px; margin:0 auto; min-height:100dvh;
+  display:flex; flex-direction:column;
+  padding:0 16px calc(20px + env(safe-area-inset-bottom));
+}
+
+/* ---------- top bar ---------- */
+.bar{display:flex;align-items:center;gap:12px;padding:14px 2px 10px}
+.bar .icon-btn{
+  width:34px;height:34px;border-radius:9px;border:1px solid var(--line);
+  display:grid;place-items:center;color:var(--ink-2);background:var(--surface);flex:none;
+}
+.bar .icon-btn:hover{color:var(--ink);border-color:var(--line-2)}
+.bar .title{flex:1;font-size:14px;font-weight:500;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.track{flex:1;height:6px;border-radius:99px;background:var(--surface-2);overflow:hidden}
+.track > i{display:block;height:100%;background:var(--accent);border-radius:99px;width:0;transition:width .35s cubic-bezier(.4,0,.2,1)}
+.count{
+  font-family:"IBM Plex Sans",sans-serif;font-variant-numeric:tabular-nums;
+  font-size:13px;color:var(--ink-2);letter-spacing:.02em;flex:none;
+}
+.count b{color:var(--ink);font-weight:600}
+
+/* ---------- typography ---------- */
+.eyebrow{
+  font-family:"IBM Plex Sans",sans-serif;font-size:11px;font-weight:600;
+  letter-spacing:.16em;text-transform:uppercase;color:var(--accent);
+}
+h1{
+  font-family:"Frank Ruhl Libre",Georgia,serif;font-weight:700;
+  font-size:clamp(30px,9vw,42px);line-height:1.1;margin:8px 0 10px;
+  text-wrap:balance;letter-spacing:-.01em;
+}
+.lede{color:var(--ink-2);font-size:15px;line-height:1.6;margin:0;max-width:36ch}
+.note{font-size:12.5px;color:var(--ink-2);line-height:1.6;text-align:center;padding:0 8px}
+
+/* ---------- home ---------- */
+.home-wrap{flex:1;display:flex;flex-direction:column;justify-content:center;gap:24px;padding:28px 0}
+.stats-row{display:flex;gap:10px}
+.stat{flex:1;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:11px 13px}
+.stat b{
+  display:block;font-family:"IBM Plex Sans",sans-serif;font-size:22px;font-weight:600;
+  font-variant-numeric:tabular-nums;line-height:1.2;
+}
+.stat span{font-size:11.5px;color:var(--ink-2)}
+
+.deck-list{display:flex;flex-direction:column;gap:10px}
+.deck-card{
+  display:flex;align-items:center;gap:13px;text-align:right;width:100%;
+  background:var(--surface);border:1px solid var(--line);border-radius:15px;
+  padding:14px;box-shadow:var(--shadow);
+  transition:border-color .15s,transform .1s;
+}
+.deck-card:hover{border-color:var(--accent)}
+.deck-card:active{transform:scale(.99)}
+.deck-card .dot{width:10px;height:10px;border-radius:99px;flex:none}
+.deck-card .txt{flex:1;min-width:0}
+.deck-card .txt strong{display:block;font-family:"Frank Ruhl Libre",Georgia,serif;font-size:19px;font-weight:700}
+.deck-card .txt span{display:block;font-size:12.5px;color:var(--ink-2);margin-top:2px}
+.deck-card .prog{
+  font-family:"IBM Plex Sans",sans-serif;font-size:12px;color:var(--ink-2);
+  font-variant-numeric:tabular-nums;flex:none;text-align:center;
+  direction:ltr;white-space:nowrap;
+}
+.deck-card .prog b{display:block;font-size:16px;font-weight:600;color:var(--ink)}
+
+/* ---------- deck screen ---------- */
+.deck-wrap{flex:1;display:flex;flex-direction:column;justify-content:center;gap:22px;padding:20px 0}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:var(--shadow)}
+.panel-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:14px}
+.panel-title{font-family:"Frank Ruhl Libre",Georgia,serif;font-size:19px;font-weight:700}
+.panel-meta{font-family:"IBM Plex Sans",sans-serif;font-size:12px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.modes{display:flex;flex-direction:column;gap:8px}
+.mode{
+  display:flex;align-items:center;gap:12px;text-align:right;
+  border:1px solid var(--line);border-radius:12px;padding:13px 14px;
+  background:var(--bg);transition:border-color .15s,background .15s,transform .1s;
+}
+.mode:hover{border-color:var(--accent);background:var(--surface)}
+.mode:active{transform:scale(.99)}
+.mode .glyph{
+  width:38px;height:38px;flex:none;border-radius:10px;background:var(--surface-2);
+  display:grid;place-items:center;color:var(--accent);font-family:"IBM Plex Sans",sans-serif;
+  font-size:13px;font-weight:600;
+}
+.mode .txt{flex:1;min-width:0}
+.mode .txt strong{display:block;font-size:15px;font-weight:500}
+.mode .txt span{display:block;font-size:12.5px;color:var(--ink-2);margin-top:1px}
+.mode .arrow{color:var(--line-2);flex:none}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+.legend span{font-family:"IBM Plex Sans",sans-serif;font-size:11.5px;color:var(--ink-2);display:inline-flex;align-items:center;gap:5px}
+.legend i{width:9px;height:9px;border-radius:3px;display:inline-block}
+.link-row{display:flex;gap:8px}
+.link-btn{
+  flex:1;text-align:center;border:1px dashed var(--line-2);border-radius:12px;
+  padding:11px;font-size:14px;color:var(--ink-2);
+}
+.link-btn:hover{color:var(--accent);border-color:var(--accent)}
+
+/* ---------- quiz ---------- */
+.quiz{flex:1;display:flex;flex-direction:column;gap:14px;padding-bottom:8px}
+.prompt-label{
+  font-family:"IBM Plex Sans",sans-serif;font-size:11px;font-weight:600;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2);text-align:center;
+}
+.stage{
+  background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);
+  display:grid;place-items:center;padding:18px 14px;min-height:190px;
+  background-image:radial-gradient(var(--line) .8px, transparent .8px);
+  background-size:14px 14px;background-position:center;
+}
+.stage > svg{width:100%;height:auto;max-height:200px}
+.stage .q-text{text-align:center;max-width:30ch}
+.stage .q-text b{
+  display:block;font-family:"Frank Ruhl Libre",Georgia,serif;
+  font-size:clamp(24px,7.5vw,34px);font-weight:700;line-height:1.2;
+}
+.stage .q-text b.ltr{direction:ltr}
+.stage .q-text span{display:block;font-size:15px;color:var(--ink-2);margin-top:8px;line-height:1.5}
+.el-tile{text-align:center}
+.el-tile b{
+  display:block;font-family:"IBM Plex Sans",sans-serif;font-size:64px;font-weight:600;
+  line-height:1;letter-spacing:-.02em;
+}
+.el-tile span{display:block;font-size:14px;color:var(--ink-2);margin-top:10px}
+.pair{display:flex;align-items:stretch;gap:10px;width:100%}
+.pair > div{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:6px}
+.pair svg{width:100%;height:auto;max-height:130px}
+.pair .tag{
+  font-family:"IBM Plex Sans",sans-serif;font-size:11px;font-weight:600;color:var(--ink-2);
+  border:1px solid var(--line);border-radius:6px;padding:1px 7px;
+}
+.pair .sep{flex:none;width:1px;background:var(--line);align-self:stretch}
+
+.opts{display:flex;flex-direction:column;gap:8px}
+.opts.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.opt{
+  position:relative;border:1.5px solid var(--line);border-radius:12px;background:var(--surface);
+  transition:border-color .15s,background .15s,transform .08s;text-align:right;
+}
+.opt:not(:disabled):hover{border-color:var(--line-2)}
+.opt:not(:disabled):active{transform:scale(.99)}
+.opt.text{display:flex;align-items:center;gap:10px;padding:12px 13px}
+.opt.text .key{
+  font-family:"IBM Plex Sans",sans-serif;font-size:11px;color:var(--ink-2);
+  width:18px;height:18px;border-radius:5px;border:1px solid var(--line);
+  display:grid;place-items:center;flex:none;
+}
+.opt.text .lbl{flex:1;min-width:0}
+.opt.text .lbl strong{display:block;font-size:15px;font-weight:500;line-height:1.35}
+.opt.text .lbl strong.ltr{direction:ltr;text-align:right}
+.opt.text .lbl em{display:block;font-style:normal;font-size:12px;color:var(--ink-2);margin-top:1px;line-height:1.4}
+.opt.text .sym{
+  font-family:"IBM Plex Sans",sans-serif;font-size:20px;font-weight:600;
+  width:38px;flex:none;text-align:center;
+}
+.opt.pic{padding:10px;display:grid;place-items:center;min-height:132px}
+.opt.pic svg{width:100%;height:auto;max-height:112px}
+.opt.correct{border-color:var(--ok);background:var(--ok-bg)}
+.opt.wrong{border-color:var(--bad);background:var(--bad-bg)}
+.opt:disabled{cursor:default}
+.opt.dim{opacity:.42}
+
+.feedback{
+  min-height:52px;display:flex;align-items:center;gap:10px;border-radius:12px;
+  padding:10px 13px;font-size:14px;line-height:1.5;border:1px solid transparent;
+}
+.feedback.hide{visibility:hidden}
+.feedback.ok{background:var(--ok-bg);border-color:var(--ok);color:var(--ok)}
+.feedback.bad{background:var(--bad-bg);border-color:var(--bad);color:var(--bad)}
+.feedback .fb-txt{flex:1}
+.feedback .fb-txt b.ltr{direction:ltr;unicode-bidi:isolate}
+.next{background:var(--ink);color:var(--bg);border-radius:9px;padding:8px 16px;font-size:14px;font-weight:500;flex:none}
+
+/* ---------- results ---------- */
+.results{flex:1;display:flex;flex-direction:column;gap:18px;padding:22px 0 8px}
+.score-big{text-align:center}
+.score-big b{
+  font-family:"IBM Plex Sans",sans-serif;font-size:60px;font-weight:600;
+  font-variant-numeric:tabular-nums;line-height:1;color:var(--accent);
+}
+.score-big span{display:block;color:var(--ink-2);font-size:14px;margin-top:8px}
+.review{display:flex;flex-direction:column;gap:8px}
+.review h3{
+  font-family:"IBM Plex Sans",sans-serif;font-size:11px;font-weight:600;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2);margin:0 0 2px;
+}
+.miss{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:9px 12px}
+.miss svg{width:112px;height:66px;flex:none}
+.miss .m-sym{font-family:"IBM Plex Sans",sans-serif;font-size:26px;font-weight:600;width:52px;text-align:center;flex:none}
+.miss .m-txt{min-width:0}
+.miss .m-txt strong{display:block;font-size:15px;line-height:1.35}
+.miss .m-txt strong.ltr{direction:ltr;text-align:right}
+.miss .m-txt span{font-size:12px;color:var(--ink-2);line-height:1.4}
+.btn-row{display:flex;gap:8px}
+.btn{flex:1;text-align:center;border-radius:12px;padding:13px;font-size:15px;font-weight:500;border:1px solid var(--line);background:var(--surface)}
+.btn.primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+
+/* ---------- isomer map ---------- */
+.map-wrap{flex:1;padding:6px 0 10px;display:flex;flex-direction:column;gap:16px}
+.tree{list-style:none;margin:0;padding:0}
+.tree ul{list-style:none;margin:0;padding:0 24px 0 0;position:relative}
+.tree ul::before{
+  content:"";position:absolute;top:0;bottom:16px;right:10px;width:1.5px;background:var(--line-2);opacity:.7;
+}
+.tree li{position:relative;padding:0 16px 0 0;margin-top:8px}
+.tree ul > li::before{
+  content:"";position:absolute;top:18px;right:-14px;width:15px;height:1.5px;background:var(--line-2);opacity:.7;
+}
+.node{
+  background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:9px 12px;
+  border-right:3px solid var(--nc,var(--line-2));
+}
+.node strong{display:block;font-size:14.5px;font-weight:500}
+.node em{display:block;font-style:normal;font-size:12px;color:var(--ink-2);margin-top:2px;line-height:1.45}
+.node .ex{
+  display:block;font-family:"IBM Plex Sans",sans-serif;font-size:11.5px;color:var(--accent);
+  margin-top:4px;direction:ltr;text-align:right;
+}
+.root-node{border-right-width:3px}
+
+/* ---------- הוספת שאלה ---------- */
+.add-btn{
+  display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
+  border:1px dashed var(--line-2);border-radius:12px;padding:12px;
+  font-size:14px;color:var(--ink-2);transition:color .15s,border-color .15s;
+}
+.add-btn:hover{color:var(--accent);border-color:var(--accent)}
+
+.sheet-bg{
+  position:fixed;inset:0;background:rgba(8,14,13,.6);backdrop-filter:blur(3px);
+  display:flex;align-items:flex-end;justify-content:center;z-index:50;
+}
+.sheet{
+  width:100%;max-width:520px;background:var(--surface);
+  border:1px solid var(--line);border-bottom:none;
+  border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));
+  display:flex;flex-direction:column;gap:12px;
+  max-height:92dvh;overflow-y:auto;
+  animation:sheet-up .22s cubic-bezier(.2,.8,.3,1);
+}
+@keyframes sheet-up{from{transform:translateY(14px);opacity:0}to{transform:none;opacity:1}}
+.sheet-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.sheet-head h2{font-family:"Frank Ruhl Libre",Georgia,serif;font-size:20px;font-weight:700;margin:0}
+.sheet-head button{font-size:14px;color:var(--ink-2)}
+.sheet label{font-size:12.5px;color:var(--ink-2);display:block;margin-bottom:5px}
+.sheet textarea,.sheet select,.sheet input{
+  width:100%;background:var(--bg);color:var(--ink);border:1px solid var(--line);
+  border-radius:11px;padding:11px 12px;font:inherit;font-size:15px;
+}
+.sheet textarea{min-height:110px;resize:vertical;line-height:1.5}
+.sheet select{appearance:none}
+.sheet .hint{font-size:12px;color:var(--ink-2);line-height:1.55}
+.sheet .send{
+  background:var(--accent);color:var(--on-accent);border-radius:12px;
+  padding:13px;font-size:15px;font-weight:500;
+}
+.sheet .send:disabled{opacity:.5;cursor:default}
+.sheet .status{
+  border-radius:11px;padding:10px 12px;font-size:13.5px;line-height:1.55;
+  border:1px solid var(--line);background:var(--bg);
+}
+.sheet .status.work{border-color:var(--accent);color:var(--accent)}
+.sheet .status.ok{border-color:var(--ok);background:var(--ok-bg);color:var(--ok)}
+.sheet .status.bad{border-color:var(--bad);background:var(--bad-bg);color:var(--bad)}
+.sheet .examples{display:flex;flex-wrap:wrap;gap:6px}
+.sheet .examples button{
+  font-size:12px;color:var(--ink-2);border:1px solid var(--line);
+  border-radius:99px;padding:5px 11px;
+}
+.sheet .examples button:hover{color:var(--accent);border-color:var(--accent)}
+
+@media (prefers-reduced-motion: reduce){*{transition-duration:.01ms !important;animation-duration:.01ms !important}}
+</style>
+
+<div class="app" id="app"></div>
+
+<!--DECK_DATA-->
+<!--APP_CONFIG-->
+
+<script>
+/* viewport — מוזרק בזמן ריצה כדי לעבוד גם כארטיפקט מתארח */
+(function(){
+  var m=document.querySelector('meta[name="viewport"]');
+  if(!m){ m=document.createElement('meta'); m.name='viewport'; document.head.appendChild(m); }
+  m.content='width=device-width, initial-scale=1, viewport-fit=cover';
+  var t=document.querySelector('meta[name="theme-color"]');
+  if(!t){ t=document.createElement('meta'); t.name='theme-color'; document.head.appendChild(t); }
+  t.content=matchMedia('(prefers-color-scheme: dark)').matches?'#0B1312':'#EFF3F2';
+  var c=document.createElement('meta');
+  c.name='apple-mobile-web-app-capable'; c.content='yes'; document.head.appendChild(c);
+})();
+
+/* התוכן וההגדרות מוזרקים בזמן בנייה מ-data/decks.json ו-data/config.json */
+const DATA = JSON.parse(document.getElementById('deck-data').textContent);
+const CFG = (function(){
+  const el = document.getElementById('app-config');
+  try{ return el ? JSON.parse(el.textContent) : {}; }catch(e){ return {}; }
+})();
+
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+function shuffle(arr){
+  const a=arr.slice();
+  for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); const t=a[i]; a[i]=a[j]; a[j]=t; }
+  return a;
+}
+function sample(arr,n){ return shuffle(arr).slice(0,n); }
+
+/* ===========================================================
+   מנוע ציור מולקולות
+   a: [label,x,y]   b: [i,j,order]   order: 1 יחיד · 2 כפול · 3 טריז · 4 מקווקו
+   =========================================================== */
+function atomColor(t){
+  if(t.indexOf('P')>-1) return 'var(--c-p)';
+  if(t.indexOf('S')>-1 && t!=='Si') return 'var(--c-s)';
+  if(t.indexOf('Br')>-1 || t.indexOf('Cl')>-1) return 'var(--c-x)';
+  if(t.indexOf('N')>-1) return 'var(--c-n)';
+  if(t.indexOf('O')>-1) return 'var(--c-o)';
+  return 'var(--c-c)';
+}
+function baseLabel(t){ return t.replace(/[⁻⁺]/g,''); }
+/* מעריכים, מטענים ומורידים צרים — לא נספרים כתו מלא */
+function halfW(t){
+  const core = t.replace(/[⁻⁺¹²³₀₁₂₃₄₅₆₇₈₉]/g,'');
+  const narrow = t.length - core.length;
+  return 0.20*core.length + 0.06 + (narrow?0.09:0);
+}
+const HALF_H = 0.34;
+function edgeDist(t,dx,dy){
+  const a=halfW(t), b=HALF_H;
+  return 1/Math.sqrt((dx*dx)/(a*a) + (dy*dy)/(b*b));
+}
+
+function molSVG(g, opts){
+  opts = opts||{};
+  const pad = 0.85;
+  let minX=1e9,maxX=-1e9,minY=1e9,maxY=-1e9;
+  g.a.forEach(function(at){
+    const r = halfW(at.t);
+    minX=Math.min(minX,at.x-r); maxX=Math.max(maxX,at.x+r);
+    minY=Math.min(minY,at.y-HALF_H); maxY=Math.max(maxY,at.y+HALF_H);
+  });
+  const vx=minX-pad, vy=minY-pad, vw=(maxX-minX)+pad*2, vh=(maxY-minY)+pad*2;
+
+  let lines='', fills='';
+  g.b.forEach(function(bd){
+    const p=g.a[bd[0]], q=g.a[bd[1]], order=bd[2];
+    let dx=q.x-p.x, dy=q.y-p.y;
+    const len=Math.hypot(dx,dy); if(!len) return;
+    dx/=len; dy/=len;
+    const r1=edgeDist(p.t,dx,dy)+0.09, r2=edgeDist(q.t,dx,dy)+0.09;
+    const x1=p.x+dx*r1, y1=p.y+dy*r1, x2=q.x-dx*r2, y2=q.y-dy*r2;
+    const px=-dy, py=dx;
+    if(order===2){
+      const o=0.085;
+      lines+='<line x1="'+(x1+px*o)+'" y1="'+(y1+py*o)+'" x2="'+(x2+px*o)+'" y2="'+(y2+py*o)+'"/>';
+      lines+='<line x1="'+(x1-px*o)+'" y1="'+(y1-py*o)+'" x2="'+(x2-px*o)+'" y2="'+(y2-py*o)+'"/>';
+    } else if(order===3){                      /* טריז — קדימה מהמישור */
+      const w=0.15;
+      fills+='<polygon points="'+x1+','+y1+' '+(x2+px*w)+','+(y2+py*w)+' '+(x2-px*w)+','+(y2-py*w)+'"/>';
+    } else if(order===4){                      /* מקווקו — אחורה מהמישור */
+      const n=5, L=Math.hypot(x2-x1,y2-y1);
+      for(let k=1;k<=n;k++){
+        const f=k/(n+0.4), cx=x1+(x2-x1)*f, cy=y1+(y2-y1)*f, w=0.045+0.115*f;
+        lines+='<line x1="'+(cx+px*w)+'" y1="'+(cy+py*w)+'" x2="'+(cx-px*w)+'" y2="'+(cy-py*w)+'"/>';
+      }
+    } else {
+      lines+='<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'"/>';
+    }
+  });
+
+  let atoms='';
+  g.a.forEach(function(at){
+    const base=baseLabel(at.t);
+    const charge=at.t.indexOf('⁻')>-1?'–':(at.t.indexOf('⁺')>-1?'+':'');
+    let inner=esc(base);
+    if(charge) inner+='<tspan dy="-0.22" font-size="0.36">'+charge+'</tspan>';
+    atoms+='<text x="'+at.x+'" y="'+at.y+'" fill="'+atomColor(at.t)+'">'+inner+'</text>';
+  });
+
+  return '<svg viewBox="'+vx+' '+vy+' '+vw+' '+vh+'" xmlns="http://www.w3.org/2000/svg" '+
+    'role="img" aria-label="'+esc(opts.alt||'מבנה כימי')+'" preserveAspectRatio="xMidYMid meet">'+
+    '<g stroke="var(--ink)" stroke-width="0.055" stroke-linecap="round" opacity="0.9">'+lines+'</g>'+
+    '<g fill="var(--ink)" opacity="0.9">'+fills+'</g>'+
+    '<g font-family="IBM Plex Sans, sans-serif" font-size="0.62" font-weight="500" '+
+    'text-anchor="middle" dominant-baseline="central" direction="ltr">'+atoms+'</g></svg>';
+}
+
+/* ===========================================================
+   דאטה 1 — קבוצות פונקציונליות
+   =========================================================== */
+const GROUPS = DATA.groups;
+const CATS = {
+  hc:{he:'שלד פחמימני', color:'var(--c-c)'},
+  ox:{he:'חמצן', color:'var(--c-o)'},
+  n: {he:'חנקן', color:'var(--c-n)'},
+  s: {he:'גופרית', color:'var(--c-s)'},
+  p: {he:'זרחן', color:'var(--c-p)'},
+};
+
+/* ===========================================================
+   דאטה 2 — יסודות עיקריים (bulk) ויסודות קורט (trace)
+   =========================================================== */
+const ELEMENTS = DATA.elements;
+const BULK  = ELEMENTS.filter(function(e){return e.cat==='bulk';});
+const TRACE = ELEMENTS.filter(function(e){return e.cat==='trace';});
+
+/* ===========================================================
+   דאטה 3 — עץ האיזומרים
+   =========================================================== */
+const ISO = DATA.iso;
+/* מושגי־עזר — נבחנים בהגדרות, לא חלק מהעץ עצמו */
+const ISO_TERMS = DATA.isoTerms;
+const ISO_ALL = ISO.concat(ISO_TERMS);
+
+/* זוגות מבנים — זיהוי היחס */
+const REL = {
+  chain:      'איזומרי שלד (מבניים)',
+  position:   'איזומרי מיקום (מבניים)',
+  functional: 'איזומרי קבוצה פונקציונלית (מבניים)',
+  geometric:  'איזומרים גיאומטריים (cis/trans)',
+  enantiomers:'אננטיומרים',
+  diastereomers:'דיאסטראומרים',
+  conformers: 'קונפורמרים',
+  same:       'אותה מולקולה בדיוק',
+};
+const ISO_PAIRS = DATA.isoPairs;
+
+/* ===========================================================
+   התמדה
+   =========================================================== */
+const KEY='bio-quiz-v2';
+function loadState(){
+  try{ const r=localStorage.getItem(KEY); return r?JSON.parse(r):{best:{},rounds:0,seen:{}}; }
+  catch(e){ return {best:{},rounds:0,seen:{}}; }
+}
+function saveState(s){ try{ localStorage.setItem(KEY,JSON.stringify(s)); }catch(e){} }
+let store = loadState();
+if(!store.best || typeof store.best!=='object') store.best={};
+if(!store.seen) store.seen={};
+
+function stat(key){ return store.seen[key] || {ok:0,no:0}; }
+function weightOf(key){
+  const s=stat(key);
+  return 1 + s.no*2.5 - Math.min(s.ok,4)*0.18;
+}
+/* בוחר פריטים, עם עדיפות לאלה שנכשלת בהם */
+function pickWeighted(items, n, keyFn){
+  const pool = shuffle(items);
+  pool.sort(function(a,b){ return weightOf(keyFn(b))-weightOf(keyFn(a)); });
+  return shuffle(pool.slice(0, Math.min(pool.length, n+6))).slice(0,n);
+}
+function masteredCount(items, keyFn){
+  return items.filter(function(it){ const s=stat(keyFn(it)); return s.ok>=2 && s.ok>s.no; }).length;
+}
+
+/* ===========================================================
+   בוני שאלות
+   שאלה: {key, label, prompt, optionKind, options:[{id,main,sub,ltr,mol,sym}], answer, why}
+   =========================================================== */
+
+/* --- חבילה 1: קבוצות פונקציונליות --- */
+function fgDistractors(t){
+  const same = shuffle(GROUPS.filter(function(g){ return g.cat===t.cat && g.id!==t.id; }));
+  const other = shuffle(GROUPS.filter(function(g){ return g.cat!==t.cat; }));
+  return same.concat(other).slice(0,3);
+}
+function fgQuestion(mode){
+  const g = fgQuestion.pool.shift();
+  const dir = mode==='mix' ? (Math.random()<0.5?'s2n':'n2s') : mode;
+  const opts = shuffle([g].concat(fgDistractors(g)));
+  if(dir==='s2n'){
+    return { key:'fg:'+g.id, label:'איזו קבוצה זו?',
+      prompt:{kind:'mol', mol:g},
+      optionKind:'text',
+      options:opts.map(function(o){ return {id:o.id, main:o.en, ltr:true, sub:o.he}; }),
+      answer:g.id, why:null };
+  }
+  return { key:'fg:'+g.id, label:'איזה מבנה מתאים?',
+    prompt:{kind:'text', main:g.en, ltr:true, sub:g.he},
+    optionKind:'pic',
+    options:opts.map(function(o){ return {id:o.id, mol:o}; }),
+    answer:g.id, why:null };
+}
+
+/* --- חבילה 2: יסודות --- */
+function elQuestion(mode){
+  const kind = mode==='mix' ? sample(['sym','name','class','role','role2'],1)[0] : mode;
+  const e = elQuestion.pool.shift();
+
+  if(kind==='sym'){
+    const opts = shuffle([e].concat(sample(ELEMENTS.filter(function(x){return x.id!==e.id;}),3)));
+    return { key:'el:'+e.id, label:'איזה יסוד זה?',
+      prompt:{kind:'element', sym:e.sym},
+      optionKind:'text',
+      options:opts.map(function(o){ return {id:o.id, main:o.en, ltr:true, sub:o.he}; }),
+      answer:e.id, why:(e.cat==='bulk'?'יסוד עיקרי (bulk). ':'יסוד קורט (trace). ')+e.role };
+  }
+  if(kind==='name'){
+    const opts = shuffle([e].concat(sample(ELEMENTS.filter(function(x){return x.id!==e.id;}),3)));
+    return { key:'el:'+e.id, label:'מה הסמל?',
+      prompt:{kind:'text', main:e.he, sub:e.en},
+      optionKind:'text',
+      options:opts.map(function(o){ return {id:o.id, sym:o.sym, main:o.he}; }),
+      answer:e.id, why:(e.cat==='bulk'?'יסוד עיקרי (bulk). ':'יסוד קורט (trace). ')+e.role };
+  }
+  if(kind==='class'){
+    /* בחר את היחיד שמשתייך לקטגוריה הנגדית */
+    const askTrace = e.cat==='trace';
+    const target = askTrace ? e : e;
+    const foils = sample((askTrace?BULK:TRACE), 3);
+    const opts = shuffle([target].concat(foils));
+    return { key:'el:'+e.id, label:'סיווג',
+      prompt:{kind:'text', main: askTrace?'מי מהבאים הוא יסוד קורט?':'מי מהבאים הוא יסוד עיקרי?',
+              sub: askTrace?'trace element — נמצא בעקבות בלבד':'bulk element — מרכיב עיקרי של מסת הגוף'},
+      optionKind:'text',
+      options:opts.map(function(o){ return {id:o.id, sym:o.sym, main:o.he, sub:o.en}; }),
+      answer:target.id, why:e.sym+' — '+e.role };
+  }
+  if(kind==='role'){
+    const opts = shuffle([e].concat(sample(ELEMENTS.filter(function(x){return x.id!==e.id;}),3)));
+    return { key:'el:'+e.id, label:'איזה יסוד ממלא את התפקיד?',
+      prompt:{kind:'text', main:e.role},
+      optionKind:'text',
+      options:opts.map(function(o){ return {id:o.id, sym:o.sym, main:o.he, sub:o.en}; }),
+      answer:e.id, why:e.cat==='bulk'?'יסוד עיקרי (bulk).':'יסוד קורט (trace).' };
+  }
+  /* role2 — יסוד ← תפקיד */
+  const opts = shuffle([e].concat(sample(ELEMENTS.filter(function(x){return x.id!==e.id;}),3)));
+  return { key:'el:'+e.id, label:'מה התפקיד?',
+    prompt:{kind:'element', sym:e.sym, caption:e.he},
+    optionKind:'text',
+    options:opts.map(function(o){ return {id:o.id, main:o.role}; }),
+    answer:e.id, why:e.cat==='bulk'?'יסוד עיקרי (bulk).':'יסוד קורט (trace).' };
+}
+
+/* --- חבילה 3: איזומרים --- */
+function isoParentOf(node){ return ISO.filter(function(x){ return x.id===node.parent; })[0]; }
+function isoQuestion(mode){
+  const kind = mode==='mix' ? sample(['def','term','tree','pair'],1)[0] : mode;
+
+  if(kind==='pair' || (kind==='mix')){
+    /* נופל לזוגות רק אם נבחר במפורש */
+  }
+  if(kind==='pair'){
+    const p = isoQuestion.pairPool.length ? isoQuestion.pairPool.shift() : sample(ISO_PAIRS,1)[0];
+    const keys = Object.keys(REL);
+    const foils = sample(keys.filter(function(k){ return k!==p.rel; }),3);
+    const opts = shuffle([p.rel].concat(foils));
+    return { key:'iso:'+p.id, label:'מה היחס בין א ל-ב?',
+      prompt:{kind:'pair', pair:p},
+      optionKind:'text',
+      options:opts.map(function(k){ return {id:k, main:REL[k]}; }),
+      answer:p.rel, why:p.why };
+  }
+  if(kind==='tree'){
+    const kids = ISO.filter(function(x){ return x.parent; });
+    const node = isoQuestion.treePool.length ? isoQuestion.treePool.shift() : sample(kids,1)[0];
+    const parent = isoParentOf(node);
+    const foils = sample(ISO.filter(function(x){ return x.id!==parent.id && x.id!==node.id; }),3);
+    const opts = shuffle([parent].concat(foils));
+    return { key:'iso:'+node.id, label:'תחת איזו קטגוריה?',
+      prompt:{kind:'text', main:node.he, sub:node.en},
+      optionKind:'text',
+      options:opts.map(function(o){ return {id:o.id, main:o.he, sub:o.en}; }),
+      answer:parent.id, why:node.he+' — '+node.def };
+  }
+  const node = isoQuestion.pool.length ? isoQuestion.pool.shift() : sample(ISO_ALL,1)[0];
+  const foils = sample(ISO_ALL.filter(function(x){ return x.id!==node.id; }),3);
+  const opts = shuffle([node].concat(foils));
+  if(kind==='def'){
+    return { key:'iso:'+node.id, label:'איזה מונח מתאים להגדרה?',
+      prompt:{kind:'text', main:node.def, sub:node.ex?('דוגמה: '+node.ex):''},
+      optionKind:'text',
+      options:opts.map(function(o){ return {id:o.id, main:o.he, sub:o.en}; }),
+      answer:node.id, why:null };
+  }
+  return { key:'iso:'+node.id, label:'מה ההגדרה?',
+    prompt:{kind:'text', main:node.he, sub:node.en},
+    optionKind:'text',
+    options:opts.map(function(o){ return {id:o.id, main:o.def}; }),
+    answer:node.id, why:node.ex?('דוגמה: '+node.ex):null };
+}
+
+/* ===========================================================
+   חבילות
+   =========================================================== */
+const ROUND = 12;
+const DECKS = [
+{ id:'fg', title:'קבוצות פונקציונליות', sub:'24 קבוצות · זיהוי מבנה ושם', color:'var(--c-o)',
+  items:GROUPS, keyFn:function(g){return 'fg:'+g.id;},
+  modes:[
+    {id:'s2n', glyph:'R–', title:'מבנה ← שם', desc:'רואה מבנה, בוחר מבין 4 שמות'},
+    {id:'n2s', glyph:'Aa', title:'שם ← מבנה', desc:'רואה שם, בוחר מבין 4 מבנים'},
+    {id:'mix', glyph:'⇄',  title:'מעורב', desc:'שני הכיוונים באקראי'},
+  ],
+  legend:Object.keys(CATS).map(function(k){ return {color:CATS[k].color, he:CATS[k].he}; }),
+  build:function(mode){
+    fgQuestion.pool = pickWeighted(GROUPS, ROUND, function(g){return 'fg:'+g.id;});
+    const out=[]; for(let i=0;i<ROUND;i++) out.push(fgQuestion(mode));
+    return out;
+  }
+},
+{ id:'el', title:'יסודות עיקריים וקורט', sub:'27 יסודות · bulk מול trace ותפקידים', color:'var(--c-n)',
+  items:ELEMENTS, keyFn:function(e){return 'el:'+e.id;},
+  modes:[
+    {id:'sym',   glyph:'Fe', title:'סמל ← שם', desc:'רואה סמל, בוחר את שם היסוד'},
+    {id:'name',  glyph:'שם', title:'שם ← סמל', desc:'רואה שם עברי, בוחר סמל'},
+    {id:'class', glyph:'⊞',  title:'עיקרי מול קורט', desc:'לזהות מי bulk ומי trace'},
+    {id:'mix',   glyph:'⇄',  title:'מעורב + תפקידים', desc:'כולל שאלות תפקיד ביוכימי'},
+  ],
+  legend:[{color:'var(--c-n)',he:'11 יסודות עיקריים (bulk)'},{color:'var(--c-s)',he:'16 יסודות קורט (trace)'}],
+  build:function(mode){
+    elQuestion.pool = pickWeighted(ELEMENTS, ROUND, function(e){return 'el:'+e.id;});
+    const out=[]; for(let i=0;i<ROUND;i++) out.push(elQuestion(mode));
+    return out;
+  }
+},
+{ id:'iso', title:'איזומרים', sub:'כל העץ · ממבניים ועד אנומרים', color:'var(--c-p)',
+  items:ISO_ALL, keyFn:function(n){return 'iso:'+n.id;},
+  map:true,
+  modes:[
+    {id:'def',  glyph:'?',  title:'הגדרה ← מונח', desc:'רואה הגדרה, בוחר את המונח'},
+    {id:'term', glyph:'≡',  title:'מונח ← הגדרה', desc:'רואה מונח, בוחר את ההגדרה'},
+    {id:'tree', glyph:'⌂',  title:'מיקום בעץ', desc:'תחת איזו קטגוריה יושב כל מונח'},
+    {id:'pair', glyph:'A|B',title:'זיהוי יחס', desc:'שני מבנים — מה היחס ביניהם'},
+    {id:'mix',  glyph:'⇄',  title:'מעורב', desc:'כל סוגי השאלות יחד'},
+  ],
+  legend:[{color:'var(--c-o)',he:'מבניים'},{color:'var(--c-n)',he:'מרחביים'},
+          {color:'var(--c-p)',he:'קונפיגורציוניים'},{color:'var(--c-s)',he:'תת־סוגים'}],
+  build:function(mode){
+    isoQuestion.pool = pickWeighted(ISO_ALL, ROUND, function(n){return 'iso:'+n.id;});
+    isoQuestion.treePool = pickWeighted(ISO.filter(function(x){return x.parent;}), ROUND, function(n){return 'iso:'+n.id;});
+    isoQuestion.pairPool = pickWeighted(ISO_PAIRS, ISO_PAIRS.length, function(p){return 'iso:'+p.id;});
+    const n = mode==='pair' ? Math.min(ROUND, ISO_PAIRS.length) : ROUND;
+    const out=[]; for(let i=0;i<n;i++) out.push(isoQuestion(mode));
+    return out;
+  }
+},
+];
+function deckById(id){ return DECKS.filter(function(d){return d.id===id;})[0]; }
+
+/* ===========================================================
+   מצב מסך
+   =========================================================== */
+let view = {name:'home'};
+let quiz = null;
+const app = document.getElementById('app');
+
+function startQuiz(deckId, mode){
+  const deck = deckById(deckId);
+  const qs = deck.build(mode);
+  quiz = {deck:deck, mode:mode, qs:qs, i:0, correct:0, misses:[]};
+  view = {name:'quiz'};
+  render();
+}
+function answer(optId){
+  const q = quiz.qs[quiz.i];
+  if(q.answered) return;
+  q.answered = optId;
+  const ok = optId===q.answer;
+  const s = store.seen[q.key] || (store.seen[q.key]={ok:0,no:0});
+  if(ok){ quiz.correct++; s.ok++; } else { s.no++; quiz.misses.push(q); }
+  saveState(store);
+  render();
+  if(ok) setTimeout(function(){ if(quiz && quiz.qs[quiz.i]===q) next(); }, 850);
+}
+function next(){
+  if(quiz.i < quiz.qs.length-1){ quiz.i++; }
+  else{
+    const pct = Math.round(quiz.correct/quiz.qs.length*100);
+    store.best[quiz.deck.id] = Math.max(store.best[quiz.deck.id]||0, pct);
+    store.rounds = (store.rounds||0)+1;
+    saveState(store);
+    quiz.done = true;
+  }
+  render();
+}
+
+/* ===========================================================
+   תצוגה
+   =========================================================== */
+function icon(kind){
+  if(kind==='home') return '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/></svg>';
+  if(kind==='plus') return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
+  return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 6l-6 6 6 6"/></svg>';
+}
+
+function renderHome(){
+  const cards = DECKS.map(function(d){
+    const m = masteredCount(d.items, d.keyFn);
+    return '<button class="deck-card" data-deck="'+d.id+'">'+
+      '<span class="dot" style="background:'+d.color+'"></span>'+
+      '<span class="txt"><strong>'+esc(d.title)+'</strong><span>'+esc(d.sub)+'</span></span>'+
+      '<span class="prog"><b>'+m+'</b>/'+d.items.length+'</span>'+
+    '</button>';
+  }).join('');
+
+  const totalMastered = DECKS.reduce(function(a,d){ return a+masteredCount(d.items,d.keyFn); },0);
+  const totalItems = DECKS.reduce(function(a,d){ return a+d.items.length; },0);
+  const bestAvg = (function(){
+    const vals = DECKS.map(function(d){ return store.best[d.id]||0; }).filter(function(v){return v>0;});
+    return vals.length ? Math.round(vals.reduce(function(a,b){return a+b;},0)/vals.length) : 0;
+  })();
+
+  app.innerHTML =
+  '<div class="home-wrap">'+
+    '<header>'+
+      '<div class="eyebrow">ביוכימיה · הכנה למבחן</div>'+
+      '<h1>שינון</h1>'+
+      '<p class="lede">חבילות תרגול קצרות. כל סבב '+ROUND+' שאלות, וכל מה שנכשלת בו חוזר.</p>'+
+    '</header>'+
+    '<div class="stats-row">'+
+      '<div class="stat"><b dir="ltr">'+totalMastered+'<span style="font-size:14px;color:var(--ink-2)">/'+totalItems+'</span></b><span>נשלטים</span></div>'+
+      '<div class="stat"><b>'+bestAvg+'%</b><span>ממוצע שיאים</span></div>'+
+      '<div class="stat"><b>'+(store.rounds||0)+'</b><span>סבבים</span></div>'+
+    '</div>'+
+    '<div class="deck-list">'+cards+'</div>'+
+    (CFG.addQuestionUrl
+      ? '<button class="add-btn" id="addBtn">'+icon('plus')+' הוסף שאלה או תקן טעות</button>'
+      : '<p class="note">רוצה נושא נוסף — תגיד לי בצ׳אט ואוסיף חבילה.</p>')+
+  '</div>';
+
+  Array.prototype.forEach.call(app.querySelectorAll('.deck-card'), function(btn){
+    btn.addEventListener('click', function(){ view={name:'deck', deck:btn.dataset.deck}; render(); });
+  });
+  const ab = app.querySelector('#addBtn');
+  if(ab) ab.addEventListener('click', openAddSheet);
+}
+
+function renderDeck(){
+  const d = deckById(view.deck);
+  const m = masteredCount(d.items, d.keyFn);
+  const modes = d.modes.map(function(mo){
+    return '<button class="mode" data-mode="'+mo.id+'">'+
+      '<span class="glyph">'+esc(mo.glyph)+'</span>'+
+      '<span class="txt"><strong>'+esc(mo.title)+'</strong><span>'+esc(mo.desc)+'</span></span>'+
+      '<span class="arrow">'+icon('arrow')+'</span></button>';
+  }).join('');
+  const legend = d.legend.map(function(l){
+    return '<span><i style="background:'+l.color+'"></i>'+esc(l.he)+'</span>';
+  }).join('');
+
+  app.innerHTML =
+  '<div class="bar">'+
+    '<button class="icon-btn" id="homeBtn" aria-label="חזרה">'+icon('home')+'</button>'+
+    '<div class="title">'+esc(d.title)+'</div>'+
+    '<div class="count">'+m+'/'+d.items.length+' נשלטים</div>'+
+  '</div>'+
+  '<div class="deck-wrap">'+
+    '<div class="panel">'+
+      '<div class="panel-head"><div class="panel-title">בחר סוג תרגול</div>'+
+      '<div class="panel-meta">שיא '+(store.best[d.id]||0)+'%</div></div>'+
+      '<div class="modes">'+modes+'</div>'+
+      '<div class="legend">'+legend+'</div>'+
+    '</div>'+
+    (d.map ? '<div class="link-row"><button class="link-btn" id="mapBtn">מפת האיזומרים — לצפייה לפני התרגול</button></div>' : '')+
+  '</div>';
+
+  app.querySelector('#homeBtn').addEventListener('click', function(){ view={name:'home'}; render(); });
+  const mb=app.querySelector('#mapBtn');
+  if(mb) mb.addEventListener('click', function(){ view={name:'map', back:d.id}; render(); });
+  Array.prototype.forEach.call(app.querySelectorAll('.mode'), function(btn){
+    btn.addEventListener('click', function(){ startQuiz(d.id, btn.dataset.mode); });
+  });
+}
+
+function promptHTML(p){
+  if(p.kind==='mol') return molSVG(p.mol,{alt:'מבנה לזיהוי'});
+  if(p.kind==='element')
+    return '<div class="el-tile"><b>'+esc(p.sym)+'</b>'+(p.caption?'<span>'+esc(p.caption)+'</span>':'')+'</div>';
+  if(p.kind==='pair'){
+    return '<div class="pair">'+
+      '<div><span class="tag">א</span>'+molSVG(p.pair.A,{alt:'מבנה א'})+'</div>'+
+      '<div class="sep"></div>'+
+      '<div><span class="tag">ב</span>'+molSVG(p.pair.B,{alt:'מבנה ב'})+'</div>'+
+    '</div>';
+  }
+  return '<div class="q-text"><b'+(p.ltr?' class="ltr"':'')+'>'+esc(p.main)+'</b>'+
+    (p.sub?'<span>'+esc(p.sub)+'</span>':'')+'</div>';
+}
+
+function renderQuiz(){
+  const q = quiz.qs[quiz.i];
+  const answered = !!q.answered;
+  const ok = answered && q.answered===q.answer;
+  const correctOpt = q.options.filter(function(o){ return o.id===q.answer; })[0];
+
+  let opts;
+  if(q.optionKind==='pic'){
+    opts = '<div class="opts grid">'+q.options.map(function(o){
+      let cls='opt pic';
+      if(answered){ cls += o.id===q.answer ? ' correct' : (o.id===q.answered ? ' wrong' : ' dim'); }
+      return '<button class="'+cls+'" data-id="'+o.id+'"'+(answered?' disabled':'')+'>'+
+        molSVG(o.mol,{alt:'אפשרות מבנה'})+'</button>';
+    }).join('')+'</div>';
+  } else {
+    opts = '<div class="opts">'+q.options.map(function(o,idx){
+      let cls='opt text';
+      if(answered){ cls += o.id===q.answer ? ' correct' : (o.id===q.answered ? ' wrong' : ' dim'); }
+      const lead = o.sym
+        ? '<span class="sym">'+esc(o.sym)+'</span>'
+        : '<span class="key">'+(idx+1)+'</span>';
+      return '<button class="'+cls+'" data-id="'+esc(o.id)+'"'+(answered?' disabled':'')+'>'+
+        lead+'<span class="lbl"><strong'+(o.ltr?' class="ltr"':'')+'>'+esc(o.main)+'</strong>'+
+        (o.sub?'<em>'+esc(o.sub)+'</em>':'')+'</span></button>';
+    }).join('')+'</div>';
+  }
+
+  let fb='<div class="feedback hide"></div>';
+  if(answered){
+    const name = correctOpt ? correctOpt.main : '';
+    if(ok){
+      fb = '<div class="feedback ok"><span class="fb-txt">נכון'+(q.why?' — '+esc(q.why):'')+'</span></div>';
+    } else {
+      fb = '<div class="feedback bad"><span class="fb-txt">התשובה: <b'+(correctOpt&&correctOpt.ltr?' class="ltr"':'')+'>'+
+        esc(name)+'</b>'+(q.why?' · '+esc(q.why):'')+'</span>'+
+        '<button class="next" id="nextBtn">הבא</button></div>';
+    }
+  }
+
+  app.innerHTML =
+  '<div class="bar">'+
+    '<button class="icon-btn" id="homeBtn" aria-label="חזרה">'+icon('home')+'</button>'+
+    '<div class="track"><i style="width:'+(quiz.i/quiz.qs.length*100)+'%"></i></div>'+
+    '<div class="count" dir="ltr"><b>'+(quiz.i+1)+'</b>/'+quiz.qs.length+' · ✓'+quiz.correct+'</div>'+
+  '</div>'+
+  '<div class="quiz">'+
+    '<div class="prompt-label">'+esc(q.label)+'</div>'+
+    '<div class="stage">'+promptHTML(q.prompt)+'</div>'+
+    opts + fb +
+  '</div>';
+
+  app.querySelector('#homeBtn').addEventListener('click', function(){ view={name:'deck',deck:quiz.deck.id}; quiz=null; render(); });
+  Array.prototype.forEach.call(app.querySelectorAll('.opt'), function(btn){
+    btn.addEventListener('click', function(){ answer(btn.dataset.id); });
+  });
+  const nb=app.querySelector('#nextBtn');
+  if(nb) nb.addEventListener('click', next);
+}
+
+function renderResults(){
+  const pct = Math.round(quiz.correct/quiz.qs.length*100);
+  const seen={}, uniq=[];
+  quiz.misses.forEach(function(q){ if(!seen[q.key]){ seen[q.key]=1; uniq.push(q); } });
+  const verdict = pct===100 ? 'סבב מושלם.' : pct>=75 ? 'קרוב. עוד סבב ונעול.' : 'החומר עוד רופף — סבב נוסף.';
+
+  const rows = uniq.map(function(q){
+    const c = q.options.filter(function(o){ return o.id===q.answer; })[0] || {};
+    let lead='';
+    if(c.mol) lead = molSVG(c.mol,{alt:'מבנה'});
+    else if(c.sym) lead = '<span class="m-sym">'+esc(c.sym)+'</span>';
+    else if(q.prompt.kind==='element') lead = '<span class="m-sym">'+esc(q.prompt.sym)+'</span>';
+    return '<div class="miss">'+lead+'<div class="m-txt">'+
+      '<strong'+(c.ltr?' class="ltr"':'')+'>'+esc(c.main||'')+'</strong>'+
+      '<span>'+esc(c.sub||q.why||'')+'</span></div></div>';
+  }).join('');
+
+  app.innerHTML =
+  '<div class="bar">'+
+    '<button class="icon-btn" id="homeBtn" aria-label="חזרה">'+icon('home')+'</button>'+
+    '<div class="title">'+esc(quiz.deck.title)+'</div>'+
+    '<div class="count">סיום</div>'+
+  '</div>'+
+  '<div class="results">'+
+    '<div class="score-big"><b>'+pct+'%</b><span>'+quiz.correct+' מתוך '+quiz.qs.length+' · '+verdict+'</span></div>'+
+    (uniq.length ? '<div class="review"><h3>לחזור עליהן</h3>'+rows+'</div>'
+                 : '<p class="note">אפס טעויות. אין מה לחזור עליו.</p>')+
+    '<div class="btn-row">'+
+      '<button class="btn primary" id="againBtn">סבב נוסף</button>'+
+      '<button class="btn" id="deckBtn">חבילה</button>'+
+    '</div>'+
+  '</div>';
+
+  const deckId = quiz.deck.id, mode = quiz.mode;
+  app.querySelector('#homeBtn').addEventListener('click', function(){ quiz=null; view={name:'home'}; render(); });
+  app.querySelector('#deckBtn').addEventListener('click', function(){ quiz=null; view={name:'deck',deck:deckId}; render(); });
+  app.querySelector('#againBtn').addEventListener('click', function(){ startQuiz(deckId, mode); });
+}
+
+function renderMap(){
+  function nodeHTML(n){
+    return '<div class="node" style="--nc:'+n.color+'"><strong>'+esc(n.he)+'</strong>'+
+      '<em>'+esc(n.def)+'</em>'+(n.ex?'<span class="ex">'+esc(n.ex)+'</span>':'')+'</div>';
+  }
+  function childrenOf(id){ return ISO.filter(function(x){ return x.parent===id; }); }
+  function branch(id){
+    const kids = childrenOf(id);
+    if(!kids.length) return '';
+    return '<ul>'+kids.map(function(k){
+      return '<li>'+nodeHTML(k)+branch(k.id)+'</li>';
+    }).join('')+'</ul>';
+  }
+  const root = ISO[0];
+  const extras = ISO_TERMS.map(function(t){
+    return '<div class="node" style="--nc:var(--line-2)"><strong>'+esc(t.he)+'</strong><em>'+esc(t.def)+'</em>'+
+      (t.ex?'<span class="ex">'+esc(t.ex)+'</span>':'')+'</div>';
+  }).join('');
+
+  app.innerHTML =
+  '<div class="bar">'+
+    '<button class="icon-btn" id="backBtn" aria-label="חזרה">'+icon('arrow')+'</button>'+
+    '<div class="title">מפת האיזומרים</div>'+
+  '</div>'+
+  '<div class="map-wrap">'+
+    '<div class="tree">'+nodeHTML(root)+branch(root.id)+'</div>'+
+    '<div><h3 style="font-family:\'IBM Plex Sans\',sans-serif;font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2);margin:4px 0 8px">מושגים נלווים</h3>'+
+    '<div style="display:flex;flex-direction:column;gap:8px">'+extras+'</div></div>'+
+  '</div>';
+
+  app.querySelector('#backBtn').addEventListener('click', function(){ view={name:'deck',deck:view.back}; render(); });
+}
+
+/* ===========================================================
+   הוספת שאלה — שולח בקשה לפונקציית Supabase, שמפעילה את Claude
+   ומעדכנת את data/decks.json ברפו. הדיפלוי מתרחש אוטומטית.
+   =========================================================== */
+const PASS_KEY = 'shinun-pass';
+function getPass(){ try{ return localStorage.getItem(PASS_KEY)||''; }catch(e){ return ''; } }
+function setPass(v){ try{ localStorage.setItem(PASS_KEY, v); }catch(e){} }
+
+const EXAMPLES = [
+  'תוסיף שאלה על הקבוצה הפוספודיאסטר',
+  'תוסיף את היסוד ליתיום כיסוד קורט',
+  'ההגדרה של אנומרים לא מדויקת — תקן',
+];
+
+function openAddSheet(){
+  const bg = document.createElement('div');
+  bg.className = 'sheet-bg';
+  const hasPass = !!getPass();
+  bg.innerHTML =
+    '<div class="sheet" role="dialog" aria-modal="true" aria-label="הוספת שאלה">'+
+      '<div class="sheet-head"><h2>הוסף שאלה או תיקון</h2>'+
+        '<button id="sheetClose">סגור</button></div>'+
+      '<p class="hint">כתוב בשפה חופשית מה להוסיף או מה לתקן. Claude ינסח את הפריט, '+
+        'יוסיף אותו לתוכן ויעלה גרסה חדשה של האתר. לוקח כדקה־שתיים.</p>'+
+      '<div class="examples">'+EXAMPLES.map(function(e,i){
+        return '<button data-ex="'+i+'">'+esc(e)+'</button>'; }).join('')+'</div>'+
+      '<div><label for="addTxt">הבקשה</label>'+
+        '<textarea id="addTxt" placeholder="למשל: תוסיף שאלה על קבוצת הסולפט, ואת התפקיד שלה"></textarea></div>'+
+      '<div><label for="addDeck">לאיזו חבילה</label>'+
+        '<select id="addDeck">'+
+          '<option value="auto">שיקבע לבד</option>'+
+          DECKS.map(function(d){ return '<option value="'+d.id+'">'+esc(d.title)+'</option>'; }).join('')+
+        '</select></div>'+
+      (hasPass ? '' :
+        '<div><label for="addPass">סיסמה</label>'+
+        '<input id="addPass" type="password" autocomplete="off" placeholder="נשמרת במכשיר, פעם אחת"></div>')+
+      '<button class="send" id="addSend">שלח</button>'+
+      '<div class="status" id="addStatus" hidden></div>'+
+    '</div>';
+  document.body.appendChild(bg);
+
+  const txt = bg.querySelector('#addTxt');
+  const status = bg.querySelector('#addStatus');
+  const send = bg.querySelector('#addSend');
+  function close(){ bg.remove(); document.removeEventListener('keydown', onKey); }
+  function onKey(e){ if(e.key==='Escape') close(); }
+  document.addEventListener('keydown', onKey);
+  bg.addEventListener('click', function(e){ if(e.target===bg) close(); });
+  bg.querySelector('#sheetClose').addEventListener('click', close);
+  Array.prototype.forEach.call(bg.querySelectorAll('.examples button'), function(b){
+    b.addEventListener('click', function(){ txt.value = EXAMPLES[+b.dataset.ex]; txt.focus(); });
+  });
+  txt.focus();
+
+  function say(cls, msg){ status.hidden=false; status.className='status '+cls; status.textContent=msg; }
+
+  send.addEventListener('click', function(){
+    const body = txt.value.trim();
+    if(!body){ say('bad','צריך לכתוב מה להוסיף.'); txt.focus(); return; }
+    const passInput = bg.querySelector('#addPass');
+    const pass = passInput ? passInput.value.trim() : getPass();
+    if(!pass){ say('bad','צריך סיסמה.'); return; }
+
+    send.disabled = true;
+    say('work','Claude כותב את הפריט ומעדכן את התוכן…');
+    fetch(CFG.addQuestionUrl, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ passphrase:pass, request:body, deck:bg.querySelector('#addDeck').value })
+    }).then(function(r){
+      return r.json().then(function(j){ return {ok:r.ok, status:r.status, body:j}; })
+              .catch(function(){ return {ok:r.ok, status:r.status, body:{}}; });
+    }).then(function(res){
+      if(res.status===401){ say('bad','סיסמה שגויה.'); send.disabled=false; return; }
+      if(!res.ok){ say('bad', res.body.error || ('השרת החזיר '+res.status)); send.disabled=false; return; }
+      if(passInput) setPass(pass);
+      say('ok', (res.body.summary || 'נוסף.') + ' האתר נבנה מחדש — רענן בעוד כדקה.');
+      send.textContent = 'רענן עכשיו';
+      send.disabled = false;
+      send.onclick = function(){ location.reload(true); };
+    }).catch(function(err){
+      say('bad','לא הצלחתי להתחבר: '+err.message);
+      send.disabled = false;
+    });
+  });
+}
+
+function render(){
+  if(quiz && quiz.done) renderResults();
+  else if(quiz) renderQuiz();
+  else if(view.name==='deck') renderDeck();
+  else if(view.name==='map') renderMap();
+  else renderHome();
+  window.scrollTo(0,0);
+}
+
+document.addEventListener('keydown', function(e){
+  if(!quiz || quiz.done) return;
+  const q = quiz.qs[quiz.i];
+  if(q.answered && (e.key==='Enter'||e.key===' ')){ e.preventDefault(); next(); return; }
+  const n = parseInt(e.key,10);
+  if(n>=1 && n<=4 && !q.answered) answer(q.options[n-1].id);
+});
+
+render();
+</script>

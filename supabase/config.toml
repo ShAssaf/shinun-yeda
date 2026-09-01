@@ -1,0 +1,4 @@
+project_id = "shinun-biochem"
+
+[functions.add-question]
+verify_jwt = false

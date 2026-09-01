@@ -1,0 +1,12 @@
+{
+  "appId": "il.shlomo.shinun",
+  "appName": "שינון ביוכימיה",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#0B1312"
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}
