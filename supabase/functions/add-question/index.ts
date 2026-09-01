@@ -15,7 +15,7 @@ import { decodeBase64, encodeBase64 } from 'jsr:@std/encoding@1/base64';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'content-type',
+  'Access-Control-Allow-Headers': 'content-type, authorization',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
@@ -145,6 +145,32 @@ function validateLabel(ui: unknown, item: Record<string, unknown>, i: number, er
     errs.push(`${path}: הנתיב "${item.path}" אינו תווית קיימת`);
 }
 
+
+/* ---------- אימות ---------- */
+/* טוקן גוגל דרך Supabase, או סיסמה כגיבוי. ALLOWED_EMAILS חובה לזרימת הטוקן —
+   בלעדיו כל חשבון גוגל בעולם היה מורשה, ולכן נכשלים סגור. */
+async function authorize(req: Request, body: { passphrase?: string }, pass: string) {
+  const bearer = req.headers.get('Authorization')?.replace(/^Bearer\s+/i, '').trim();
+  if (bearer) {
+    const url = Deno.env.get('SUPABASE_URL')?.trim();
+    const anon = Deno.env.get('SUPABASE_ANON_KEY')?.trim();
+    if (!url || !anon) return { ok: false, msg: 'הגדרות Supabase חסרות בפונקציה' };
+    const r = await fetch(`${url}/auth/v1/user`, {
+      headers: { apikey: anon, Authorization: `Bearer ${bearer}` },
+    });
+    if (!r.ok) return { ok: false, msg: 'ההתחברות פגה. התחבר שוב.' };
+    const user = await r.json() as { email?: string };
+    const allowed = (Deno.env.get('ALLOWED_EMAILS') ?? '')
+      .split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+    if (!allowed.length) return { ok: false, msg: 'ALLOWED_EMAILS לא מוגדר — אף חשבון אינו מורשה.' };
+    const email = (user.email ?? '').toLowerCase();
+    if (!allowed.includes(email)) return { ok: false, msg: `החשבון ${email} אינו מורשה.` };
+    return { ok: true, who: email };
+  }
+  if (body.passphrase && safeEqual(body.passphrase, pass)) return { ok: true, who: 'passphrase' };
+  return { ok: false, msg: 'נדרשת התחברות' };
+}
+
 /* ---------- הנחיה ל-Claude ---------- */
 
 const SYSTEM = `אתה עורך התוכן של אפליקציית שינון לביוכימיה, בעברית.
@@ -264,8 +290,8 @@ Deno.serve(async (req) => {
   let body: { passphrase?: string; request?: string; deck?: string; check?: boolean };
   try { body = await req.json(); } catch { return json({ error: 'גוף הבקשה אינו JSON' }, 400); }
 
-  if (!body.passphrase || !safeEqual(body.passphrase, env.pass!))
-    return json({ error: 'סיסמה שגויה' }, 401);
+  const auth = await authorize(req, body, env.pass!);
+  if (!auth.ok) return json({ error: auth.msg }, 401);
 
   /* בדיקת תקינות — מאמתת את שני המפתחות בלי לכתוב כלום ובלי לצרוך טוקנים */
   if (body.check) {

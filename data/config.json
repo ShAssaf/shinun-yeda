@@ -1,4 +1,6 @@
 {
   "addQuestionUrl": "https://pedtujzyqjxzrhcvxshj.supabase.co/functions/v1/add-question",
-  "editAppUrl": "https://pedtujzyqjxzrhcvxshj.supabase.co/functions/v1/edit-app"
+  "editAppUrl": "https://pedtujzyqjxzrhcvxshj.supabase.co/functions/v1/edit-app",
+  "supabaseUrl": "https://pedtujzyqjxzrhcvxshj.supabase.co",
+  "supabaseKey": "sb_publishable_v97CjxLvQ-LKg4ZoZQU8BA_PCrntzaL"
 }

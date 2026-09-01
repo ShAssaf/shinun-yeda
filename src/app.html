@@ -347,6 +347,22 @@ h1{
 .lab-status.ok{border-color:var(--ok);background:var(--ok-bg);color:var(--ok)}
 .lab-status.bad{border-color:var(--bad);background:var(--bad-bg);color:var(--bad)}
 
+/* ---------- חשבון ---------- */
+.acct{
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  font-size:12.5px;color:var(--ink-2);padding:2px;
+}
+.acct b{font-weight:500;color:var(--ink);direction:ltr}
+.acct button{color:var(--ink-2);text-decoration:underline;text-underline-offset:3px}
+.acct button:hover{color:var(--accent)}
+.gbtn{
+  display:flex;align-items:center;justify-content:center;gap:9px;width:100%;
+  border:1px solid var(--line-2);border-radius:12px;padding:12px;
+  font-size:15px;font-weight:500;background:var(--surface);
+}
+.gbtn:hover{border-color:var(--accent)}
+.gbtn svg{flex:none}
+
 @media (prefers-reduced-motion: reduce){*{transition-duration:.01ms !important;animation-duration:.01ms !important}}
 </style>
 
@@ -808,6 +824,7 @@ function next(){
    =========================================================== */
 function icon(kind){
   if(kind==='home') return '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/></svg>';
+  if(kind==='google') return '<svg width="17" height="17" viewBox="0 0 48 48"><path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.2-.4-4.7H24v8.9h11.8c-.5 2.7-2 5-4.4 6.6v5.5h7.1c4.2-3.8 6.6-9.5 6.6-16.3z"/><path fill="#34A853" d="M24 46c6 0 11-2 14.6-5.4l-7.1-5.5c-2 1.3-4.5 2.1-7.5 2.1-5.8 0-10.7-3.9-12.4-9.1H4.3v5.7C7.9 41.1 15.4 46 24 46z"/><path fill="#FBBC05" d="M11.6 28.1c-.4-1.3-.7-2.7-.7-4.1s.3-2.8.7-4.1v-5.7H4.3C2.8 17.1 2 20.4 2 24s.8 6.9 2.3 9.8l7.3-5.7z"/><path fill="#EA4335" d="M24 10.8c3.3 0 6.2 1.1 8.5 3.3l6.3-6.3C35 4.1 30 2 24 2 15.4 2 7.9 6.9 4.3 14.2l7.3 5.7c1.7-5.2 6.6-9.1 12.4-9.1z"/></svg>';
   if(kind==='wrench') return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0 5 5l-8.4 8.4a2.1 2.1 0 0 1-3-3z"/><path d="M19.7 11.3 21 6l-2.5.7L17 4l-2.3 2.3"/></svg>';
   if(kind==='plus') return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
   return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 6l-6 6 6 6"/></svg>';
@@ -849,6 +866,9 @@ function renderHome(){
     (CFG.editAppUrl
       ? '<button class="lab-entry" id="labBtn">'+icon('wrench')+' מעבדה — שינוי האפליקציה עצמה</button>'
       : '')+
+    (authEnabled && AUTH
+      ? '<div class="acct">מחובר כ־<b>'+esc(AUTH.email||'…')+'</b> · <button id="outBtn">התנתק</button></div>'
+      : '')+
   '</div>';
 
   Array.prototype.forEach.call(app.querySelectorAll('.deck-card'), function(btn){
@@ -858,6 +878,8 @@ function renderHome(){
   if(ab) ab.addEventListener('click', openAddSheet);
   const lb = app.querySelector('#labBtn');
   if(lb) lb.addEventListener('click', function(){ view={name:'lab'}; render(); });
+  const ob = app.querySelector('#outBtn');
+  if(ob) ob.addEventListener('click', signOut);
 }
 
 function renderDeck(){
@@ -1047,6 +1069,83 @@ function renderMap(){
    הוספת שאלה — שולח בקשה לפונקציית Supabase, שמפעילה את Claude
    ומעדכנת את data/decks.json ברפו. הדיפלוי מתרחש אוטומטית.
    =========================================================== */
+/* ===========================================================
+   התחברות עם גוגל דרך Supabase — זרימת OAuth ישירה, בלי SDK,
+   כדי לא להוסיף תלות רשת לאפליקציה שאמורה לעבוד אופליין.
+   =========================================================== */
+const AUTH_KEY = 'shinun-auth';
+const authEnabled = !!(CFG.supabaseUrl && CFG.supabaseKey);
+
+function authRead(){
+  try{ const r=localStorage.getItem(AUTH_KEY); return r?JSON.parse(r):null; }catch(e){ return null; }
+}
+function authWrite(v){
+  try{ v ? localStorage.setItem(AUTH_KEY, JSON.stringify(v)) : localStorage.removeItem(AUTH_KEY); }
+  catch(e){}
+}
+let AUTH = authRead();
+
+/* חזרה מגוגל — הטוקנים מגיעים ב-hash. קולטים, מנקים מה-URL ושומרים. */
+(function absorbHash(){
+  if(!location.hash || location.hash.indexOf('access_token=')<0) return;
+  const p = new URLSearchParams(location.hash.slice(1));
+  const at = p.get('access_token'), rt = p.get('refresh_token');
+  if(at){ AUTH = {access:at, refresh:rt, email:null}; authWrite(AUTH); }
+  history.replaceState(null, '', location.pathname + location.search);
+})();
+
+function signIn(){
+  const back = location.origin + location.pathname;
+  location.href = CFG.supabaseUrl + '/auth/v1/authorize?provider=google'
+    + '&redirect_to=' + encodeURIComponent(back);
+}
+function signOut(){ AUTH = null; authWrite(null); render(); }
+
+function loadIdentity(){
+  if(!AUTH || !AUTH.access || AUTH.email) return Promise.resolve();
+  return fetch(CFG.supabaseUrl + '/auth/v1/user', {
+    headers:{ apikey: CFG.supabaseKey, Authorization: 'Bearer ' + AUTH.access }
+  }).then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(u){
+      if(u && u.email){ AUTH.email = u.email; authWrite(AUTH); render(); }
+      else { AUTH = null; authWrite(null); }
+    }).catch(function(){});
+}
+
+function refreshToken(){
+  if(!AUTH || !AUTH.refresh) return Promise.resolve(false);
+  return fetch(CFG.supabaseUrl + '/auth/v1/token?grant_type=refresh_token', {
+    method:'POST',
+    headers:{ apikey: CFG.supabaseKey, 'Content-Type':'application/json' },
+    body: JSON.stringify({ refresh_token: AUTH.refresh })
+  }).then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(j){
+      if(!j || !j.access_token){ AUTH=null; authWrite(null); return false; }
+      AUTH = {access:j.access_token, refresh:j.refresh_token, email:AUTH.email};
+      authWrite(AUTH);
+      return true;
+    }).catch(function(){ return false; });
+}
+
+/* קריאה לפונקציה — טוקן אם מחובר, סיסמה כגיבוי. מרענן פעם אחת על 401. */
+function callFn(url, payload, pass, retried){
+  const headers = {'Content-Type':'application/json'};
+  if(AUTH && AUTH.access) headers.Authorization = 'Bearer ' + AUTH.access;
+  const body = Object.assign({}, payload);
+  if(pass) body.passphrase = pass;
+  return fetch(url, {method:'POST', headers:headers, body:JSON.stringify(body)})
+    .then(function(r){
+      if(r.status===401 && AUTH && AUTH.refresh && !retried){
+        return refreshToken().then(function(ok){
+          if(!ok) return r.json().then(function(j){ return {ok:false, status:401, body:j}; });
+          return callFn(url, payload, pass, true);
+        });
+      }
+      return r.json().then(function(j){ return {ok:r.ok, status:r.status, body:j}; })
+              .catch(function(){ return {ok:r.ok, status:r.status, body:{}}; });
+    });
+}
+
 const PASS_KEY = 'shinun-pass';
 function getPass(){ try{ return localStorage.getItem(PASS_KEY)||''; }catch(e){ return ''; } }
 function setPass(v){ try{ localStorage.setItem(PASS_KEY, v); }catch(e){} }
@@ -1076,10 +1175,12 @@ function openAddSheet(){
           '<option value="auto">שיקבע לבד</option>'+
           DECKS.map(function(d){ return '<option value="'+d.id+'">'+esc(d.title)+'</option>'; }).join('')+
         '</select></div>'+
-      (hasPass ? '' :
-        '<div><label for="addPass">סיסמה</label>'+
-        '<input id="addPass" type="password" autocomplete="off" placeholder="נשמרת במכשיר, פעם אחת"></div>')+
-      '<button class="send" id="addSend">שלח</button>'+
+      (authEnabled && !AUTH
+        ? '<button class="gbtn" id="addGoogle">'+icon('google')+' התחברות עם גוגל</button>'
+        : (hasPass || AUTH ? '' :
+           '<div><label for="addPass">סיסמה</label>'+
+           '<input id="addPass" type="password" autocomplete="off" placeholder="נשמרת במכשיר, פעם אחת"></div>'))+
+      (authEnabled && !AUTH ? '' : '<button class="send" id="addSend">שלח</button>')+
       '<div class="status" id="addStatus" hidden></div>'+
     '</div>';
   document.body.appendChild(bg);
@@ -1099,26 +1200,25 @@ function openAddSheet(){
 
   function say(cls, msg){ status.hidden=false; status.className='status '+cls; status.textContent=msg; }
 
+  const gb = bg.querySelector('#addGoogle');
+  if(gb) gb.addEventListener('click', signIn);
+  if(!send) return;
+
   send.addEventListener('click', function(){
     const body = txt.value.trim();
     if(!body){ say('bad','צריך לכתוב מה להוסיף.'); txt.focus(); return; }
     const passInput = bg.querySelector('#addPass');
     const pass = passInput ? passInput.value.trim() : getPass();
-    if(!pass){ say('bad','צריך סיסמה.'); return; }
+    if(!AUTH && !pass){ say('bad','צריך להתחבר.'); return; }
 
     send.disabled = true;
     say('work','Claude כותב את הפריט ומעדכן את התוכן…');
-    fetch(CFG.addQuestionUrl, {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ passphrase:pass, request:body, deck:bg.querySelector('#addDeck').value })
-    }).then(function(r){
-      return r.json().then(function(j){ return {ok:r.ok, status:r.status, body:j}; })
-              .catch(function(){ return {ok:r.ok, status:r.status, body:{}}; });
-    }).then(function(res){
-      if(res.status===401){ say('bad','סיסמה שגויה.'); send.disabled=false; return; }
+    callFn(CFG.addQuestionUrl,
+      { request:body, deck:bg.querySelector('#addDeck').value }, pass
+    ).then(function(res){
+      if(res.status===401){ say('bad', res.body.error || 'ההתחברות נדחתה.'); send.disabled=false; return; }
       if(!res.ok){ say('bad', res.body.error || ('השרת החזיר '+res.status)); send.disabled=false; return; }
-      if(passInput) setPass(pass);
+      if(passInput && pass) setPass(pass);
       say('ok', (res.body.summary || 'נוסף.') + ' האתר נבנה מחדש — רענן בעוד כדקה.');
       send.textContent = 'רענן עכשיו';
       send.disabled = false;
@@ -1148,35 +1248,34 @@ function renderLab(){
     '<div><label for="labTxt">מה לשנות</label>'+
       '<textarea id="labTxt" placeholder="למשל: תגדיל את המבנה במסך השאלה · תוסיף מונה זמן לכל סבב · תשנה את צבע ההדגשה לכחול"'+
       (busy?' disabled':'')+'>'+esc(view.draft||'')+'</textarea></div>'+
-    (getPass() ? '' :
-      '<div><label for="labPass">סיסמה</label><input id="labPass" type="password" autocomplete="off"></div>')+
-    '<button class="send" id="labSend"'+(busy?' disabled':'')+'>'+(busy?'עובד…':'שלח')+'</button>'+
-    '<button class="undo" id="labUndo"'+(busy?' disabled':'')+'>בטל את השינוי האחרון</button>'+
+    (authEnabled && !AUTH
+      ? '<button class="gbtn" id="labGoogle">'+icon('google')+' התחברות עם גוגל</button>'
+      : (getPass() || AUTH ? '' :
+         '<div><label for="labPass">סיסמה</label><input id="labPass" type="password" autocomplete="off"></div>'))+
+    (authEnabled && !AUTH ? '' :
+      '<button class="send" id="labSend"'+(busy?' disabled':'')+'>'+(busy?'עובד…':'שלח')+'</button>'+
+      '<button class="undo" id="labUndo"'+(busy?' disabled':'')+'>בטל את השינוי האחרון</button>')+
     (view.msg ? '<div class="lab-status '+view.cls+'">'+esc(view.msg)+'</div>' : '')+
   '</div>';
 
   app.querySelector('#backBtn').addEventListener('click', function(){ view={name:'home'}; render(); });
   const txt = app.querySelector('#labTxt');
+  const gb2 = app.querySelector('#labGoogle');
+  if(gb2) gb2.addEventListener('click', signIn);
 
   function call(payload, working){
     const passInput = app.querySelector('#labPass');
     const pass = passInput ? passInput.value.trim() : getPass();
-    if(!pass){ view.msg='צריך סיסמה.'; view.cls='bad'; render(); return; }
+    if(!AUTH && !pass){ view.msg='צריך להתחבר.'; view.cls='bad'; render(); return; }
     view.busy = true; view.msg = working; view.cls='work';
     view.draft = txt ? txt.value : view.draft;
     render();
-    fetch(CFG.editAppUrl, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(Object.assign({passphrase:pass}, payload))
-    }).then(function(r){
-      return r.json().then(function(j){ return {ok:r.ok, status:r.status, body:j}; })
-              .catch(function(){ return {ok:r.ok, status:r.status, body:{}}; });
-    }).then(function(res){
+    callFn(CFG.editAppUrl, payload, pass).then(function(res){
       view.busy = false;
-      if(res.status===401){ view.msg='סיסמה שגויה.'; view.cls='bad'; }
+      if(res.status===401){ view.msg = res.body.error || 'ההתחברות נדחתה.'; view.cls='bad'; }
       else if(!res.ok){ view.msg = res.body.error || ('השרת החזיר '+res.status); view.cls='bad'; }
       else{
-        if(passInput) setPass(pass);
+        if(passInput && pass) setPass(pass);
         view.draft = '';
         view.msg = (res.body.summary||'בוצע') + ' — ' +
           (res.body.note || 'הבנייה רצה. רענן בעוד כדקה כדי לראות את התוצאה.');
@@ -1188,7 +1287,9 @@ function renderLab(){
     });
   }
 
-  app.querySelector('#labSend').addEventListener('click', function(){
+  const sendBtn = app.querySelector('#labSend');
+  if(!sendBtn) return;
+  sendBtn.addEventListener('click', function(){
     const body = txt.value.trim();
     if(!body){ view.msg='צריך לכתוב מה לשנות.'; view.cls='bad'; render(); return; }
     call({request:body}, 'Claude קורא את הקוד ומכין את השינוי…');
@@ -1217,4 +1318,5 @@ document.addEventListener('keydown', function(e){
 });
 
 render();
+if(authEnabled) loadIdentity();
 </script>
