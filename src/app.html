@@ -1263,7 +1263,7 @@ function rest(path, init, retried){
         logError('fetch', where + ' → 401 בלי טוקן רענון', {hasAuth:!!AUTH});
         return r;
       }
-      return refreshToken().then(function(ok){
+      return ensureToken(true).then(function(ok){
         if(!ok){
           logError('fetch', where + ' → 401 והרענון נכשל', {exp:tokenExp()});
           return r;
@@ -1467,6 +1467,21 @@ function importStarter(){
 
 /* טעינת הספרייה: מהשרת אם אפשר, אחרת מהמראה המקומי,
    ואם גם הוא ריק — מהתוכן המוטמע, כדי שהאפליקציה לא תהיה ריקה. */
+/* כל פעולה שמשנה תוכן מסתיימת בסנכרון. בלי זה כל שינוי דורש
+   מהמשתמש לרענן ידנית, וזה בדיוק מה שלא אמור לקרות. */
+let syncing = null;
+function syncLibrary(){
+  if(syncing) return syncing;
+  syncing = loadLibrary().then(function(res){ syncing = null; return res; });
+  return syncing;
+}
+
+function mutate(work){
+  return Promise.resolve()
+    .then(work)
+    .then(function(out){ return syncLibrary().then(function(){ return out; }); });
+}
+
 function loadLibrary(){
   return fetchLibrary().then(function(res){
     if(res.ok){
@@ -2123,7 +2138,7 @@ function signIn(){
   location.href = CFG.supabaseUrl + '/auth/v1/authorize?provider=google'
     + '&redirect_to=' + encodeURIComponent(back);
 }
-function signOut(){ AUTH = null; authWrite(null); render(); }
+function signOut(){ hardSignOut('התנתקת.'); view = {name:'home', lockErr:null}; render(); }
 
 /* אימות הרשאה מול השרת. רשימת המורשים לא יושבת כאן בכוונה —
    הקוד הזה ציבורי, והרשימה נשארת ב-ALLOWED_EMAILS בצד השרת. */
@@ -2141,11 +2156,8 @@ function verifyAccess(force){
     /* 401 = הטוקן עצמו פסול, ורק אז מנתקים. חשבון תקף שאינו ברשימת
        העורכים נשאר בפנים ופשוט לא רואה את כפתורי העריכה. */
     if(r.status === 401){
-      AUTH = null; authWrite(null);
-      try{ localStorage.removeItem(VERIFY_KEY); }catch(e){}
-      view = {name:'home', lockErr:'ההתחברות פגה. התחבר שוב.'};
-      render();
-      return;
+      /* אולי רק פג. ensureToken ינתק בעצמו אם הרענון נדחה סופית. */
+      return ensureToken(true).then(function(ok){ if(ok) return verifyAccess(true); });
     }
     return r.json().catch(function(){ return {}; }).then(function(j){
       const was = AUTH.editor;
@@ -2177,9 +2189,7 @@ function loadIdentity(){
         return;
       }
       /* אולי רק פג — מנסים לרענן לפני שמנתקים */
-      return refreshToken().then(function(ok){
-        if(!ok){ AUTH = null; authWrite(null); render(); }
-      });
+      return ensureToken(true).then(function(ok){ if(ok) return loadIdentity(); });
     }).catch(function(){});   /* אופליין — משאירים את המשתמש בפנים */
 }
 
@@ -2213,46 +2223,87 @@ function tokenStale(){
   return Date.now() > exp - 60000;   /* דקה מרווח */
 }
 
-let refreshing = null;
-function ensureToken(){
-  if(!AUTH || !AUTH.access) return Promise.resolve(false);
-  if(!tokenStale()) return Promise.resolve(true);
-  if(!refreshing) refreshing = refreshToken().then(function(ok){ refreshing = null; return ok; });
-  return refreshing;
+/* ===========================================================
+   ניהול המפגש. נקודת כניסה אחת לרענון, כדי שקריאות מקבילות לא
+   ישרפו טוקן רענון אחת לשנייה — Supabase מסובב אותם, וטוקן שכבר
+   נצרך נדחה. כשל רשת אינו מנתק; רק דחייה מפורשת של השרת מנתקת.
+   =========================================================== */
+const SESSION = { refreshing: null, timer: null, lastError: null };
+
+function hardSignOut(reason){
+  AUTH = null;
+  authWrite(null);
+  try{ localStorage.removeItem(VERIFY_KEY); }catch(e){}
+  if(SESSION.timer){ clearTimeout(SESSION.timer); SESSION.timer = null; }
+  SESSION.refreshing = null;
+  view = {name:'home', lockErr: reason || 'ההתחברות פגה. התחבר שוב.'};
+  render();
 }
 
-function refreshToken(){
-  if(!AUTH || !AUTH.refresh) return Promise.resolve(false);
+/* הקריאה היחידה שמחליפה טוקן. מחזירה 'ok' · 'transient' · 'terminal' */
+function doRefresh(){
+  if(!AUTH || !AUTH.refresh) return Promise.resolve('terminal');
   return fetch(CFG.supabaseUrl + '/auth/v1/token?grant_type=refresh_token', {
     method:'POST',
     headers:{ apikey: CFG.supabaseKey, 'Content-Type':'application/json' },
     body: JSON.stringify({ refresh_token: AUTH.refresh })
   }).then(function(r){
-      if(!r.ok) return r.text().then(function(t){
-        logError('fetch', 'refresh_token → ' + r.status, {body:String(t).slice(0,200)});
-        return null;
-      });
-      return r.json();
-    })
-    .then(function(j){
-      if(!j || !j.access_token){
-        /* גם טוקן הרענון פג — אין דרך חזרה בלי התחברות מחדש */
-        AUTH = null; authWrite(null);
-        try{ localStorage.removeItem(VERIFY_KEY); }catch(e){}
-        view = {name:'home', lockErr:'ההתחברות פגה. התחבר שוב.'};
-        render();
-        return false;
-      }
-      /* שומרים את שאר הזהות. בנייה מחדש של האובייקט מחקה את uid,
-         ובלעדיו כל שאילתה למסד חזרה 401 — זה היה השורש. */
+    if(r.ok) return r.json().then(function(j){
+      if(!j || !j.access_token) return 'terminal';
+      /* משמרים את שאר הזהות — בנייה מחדש מחקה את uid ושברה הכול */
       AUTH = Object.assign({}, AUTH, {
-        access: j.access_token,
+        access:  j.access_token,
         refresh: j.refresh_token || AUTH.refresh
       });
       authWrite(AUTH);
-      return true;
-    }).catch(function(){ return false; });
+      scheduleRefresh();
+      return 'ok';
+    });
+    return r.text().then(function(t){
+      SESSION.lastError = String(t).slice(0, 200);
+      logError('fetch', 'refresh_token → ' + r.status, {body:SESSION.lastError});
+      /* 5xx או 429 — תקלה חולפת בשרת, לא סיבה לנתק משתמש */
+      if(r.status >= 500 || r.status === 429) return 'transient';
+      return 'terminal';
+    });
+  }).catch(function(err){
+    /* אין רשת. המפגש עדיין תקף, ננסה שוב מאוחר יותר. */
+    SESSION.lastError = (err && err.message) || 'שגיאת רשת';
+    return 'transient';
+  });
 }
+
+/* נקודת הכניסה היחידה. force מרענן גם כשהטוקן נראה תקף — למשל
+   אחרי 401 שהגיע בכל זאת. */
+function ensureToken(force){
+  if(!AUTH || !AUTH.access) return Promise.resolve(false);
+  if(!force && !tokenStale()) return Promise.resolve(true);
+  if(!SESSION.refreshing){
+    SESSION.refreshing = doRefresh().then(function(res){
+      SESSION.refreshing = null;
+      if(res === 'terminal'){ hardSignOut(); return false; }
+      return res === 'ok';
+    });
+  }
+  return SESSION.refreshing;
+}
+
+/* רענון יזום לפני הפקיעה, כדי שפעולה של המשתמש לא תשלם על בקשה
+   שנכשלת. גם חזרה ללשונית מפעילה בדיקה. */
+function scheduleRefresh(){
+  if(SESSION.timer){ clearTimeout(SESSION.timer); SESSION.timer = null; }
+  const exp = tokenExp();
+  if(!exp) return;
+  const wait = Math.max(15000, exp - Date.now() - 120000);   /* שתי דקות מרווח */
+  if(wait > 2147483647) return;
+  SESSION.timer = setTimeout(function(){ ensureToken(false); }, wait);
+}
+addEventListener('visibilitychange', function(){
+  if(document.visibilityState !== 'visible' || !AUTH) return;
+  /* חזרה ללשונית מסנכרנת גם את המפגש וגם את התוכן, כך שמכשיר שני
+     או שינוי שנעשה במקום אחר מופיעים בלי פעולה ידנית. */
+  ensureToken(false).then(function(){ if(AUTH && canSync()) syncLibrary(); });
+});
 
 /* קריאה לפונקציה עם טוקן המשתמש. מרענן פעם אחת על 401. */
 const CALL_TIMEOUT = 170000;
@@ -2270,7 +2321,7 @@ function callFn(url, payload, retried){
     .then(function(r){
       if(timer) clearTimeout(timer);
       if(r.status===401 && AUTH && AUTH.refresh && !retried){
-        return refreshToken().then(function(ok){
+        return ensureToken(true).then(function(ok){
           if(!ok) return r.json().then(function(j){ return {ok:false, status:401, body:j}; });
           return callFn(url, payload, true);
         });
@@ -2399,7 +2450,7 @@ function openAddSheet(){
       /* הכתיבה למסד מיידית — מרעננים את הספרייה ומראים את התוצאה */
       const b = res.body;
       say('work', (b.summary || 'נוסף.') + ' מרענן את הספרייה…');
-      loadLibrary().then(function(){
+      syncLibrary().then(function(){
         const where = b.deck ? ' ל־' + b.deck : '';
         say('ok', (b.summary || 'נוסף.') +
           (b.created ? ' נוצר נושא חדש: ' + (b.deck || '') + '.'
@@ -2621,7 +2672,7 @@ function openStore(highlight){
   /* הספרייה נמשכת דרך אותו מסלול כמו המסך הראשי, כדי ששני המסכים
      לא יוכלו להציג מצבים שונים. קודם המאגר שאל בנפרד, ולכן נושא
      שנוצר הופיע כאן ולא שם. */
-  Promise.all([loadLibrary(), fetchStore(), fetchSubs()]).then(function(r){
+  Promise.all([syncLibrary(), fetchStore(), fetchSubs()]).then(function(r){
     r[2] = r[2] || [];
     const uid = AUTH && AUTH.uid;
     view.mine   = LIB.rows.filter(function(d){ return d.owner_id === uid; });
@@ -2735,8 +2786,8 @@ function renderStore(){
     b.addEventListener('click', function(){
       const id = b.dataset.sub;
       b.disabled = true;
-      const go = isSub(id) ? unsubscribe(id) : subscribe(id);
-      go.then(function(){ return loadLibrary(); }).then(function(){ openStore(); })
+      mutate(function(){ return isSub(id) ? unsubscribe(id) : subscribe(id); })
+        .then(function(){ openStore(); })
         .catch(function(){ b.disabled = false; });
     });
   });
@@ -2750,7 +2801,7 @@ function renderStore(){
         render();
         return;
       }
-      return loadLibrary().then(function(){ openStore(); });
+      return syncLibrary().then(function(){ openStore(); });
     });
   });
 
@@ -2794,8 +2845,7 @@ function renderStore(){
       const d = (view.mine||[]).filter(function(x){ return x.id===b.dataset.del; })[0] || {};
       if(!confirm('למחוק את "'+(d.title||'')+'"? הפעולה אינה הפיכה.')) return;
       b.disabled = true;
-      deleteDeck(b.dataset.del)
-        .then(function(){ return loadLibrary(); })
+      mutate(function(){ return deleteDeck(b.dataset.del); })
         .then(function(){ openStore(); })
         .catch(function(){ b.disabled = false; });
     });
@@ -2805,16 +2855,17 @@ function renderStore(){
   if(dd) dd.addEventListener('click', function(){
     if(!confirm('למחוק '+dups.length+' כפילויות? הראשון שנוצר בכל נושא יישמר.')) return;
     dd.disabled = true; dd.textContent = 'מנקה…';
-    Promise.all(dups.map(function(d){ return deleteDeck(d.id); }))
-      .then(function(){ return loadLibrary(); })
-      .then(function(){ openStore(); })
+    mutate(function(){
+      return Promise.all(dups.map(function(d){ return deleteDeck(d.id); }));
+    }).then(function(){ openStore(); })
       .catch(function(){ dd.disabled = false; dd.textContent = 'נקה'; });
   });
 
   Array.prototype.forEach.call(app.querySelectorAll('[data-pub]'), function(b){
     b.addEventListener('click', function(){
       b.disabled = true;
-      setVisibility(b.dataset.pub, b.dataset.to).then(function(){ openStore(); })
+      mutate(function(){ return setVisibility(b.dataset.pub, b.dataset.to); })
+        .then(function(){ openStore(); })
         .catch(function(){ b.disabled = false; });
     });
   });
@@ -3089,6 +3140,7 @@ function boot(){
     return Promise.resolve();
   }
 
+  scheduleRefresh();
   return ensureToken()               /* טוקן תקף לפני כל קריאה */
     .then(loadIdentity)              /* זהות אחת, לפני כל השאר */
     .then(function(){

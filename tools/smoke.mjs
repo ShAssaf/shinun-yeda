@@ -456,10 +456,12 @@ try {
 
 /* 5h — רענון טוקן משמר את הזהות; פקיעה מזוהה מראש */
 {
-  const src = win.eval('refreshToken.toString()');
+  const src = win.eval('doRefresh.toString()');
   check(src.indexOf('Object.assign({}, AUTH') > -1,
     'רענון בונה את הזהות מחדש ומוחק את uid');
-  check(src.indexOf('lockErr') > -1, 'כישלון רענון לא מחזיר למסך התחברות');
+  check(win.eval('hardSignOut.toString()').indexOf('lockErr') > -1,
+    'כישלון רענון לא מחזיר למסך התחברות');
+  check(src.indexOf("return 'transient'") > -1, 'כשל רשת ברענון מנתק במקום לנסות שוב');
 
   const restSrc = win.eval('rest.toString()');
   check(restSrc.indexOf('ensureToken()') > -1, 'קריאה למסד לא מוודאת טוקן תקף');
@@ -569,14 +571,14 @@ try {
 {
   const src = win.eval('openAddSheet.toString()');
   check(src.indexOf('האתר נבנה מחדש') < 0, 'ההודעה עדיין מבקשת להמתין לבנייה');
-  check(src.indexOf('loadLibrary()') > -1, 'הוספה לא מרעננת את הספרייה');
+  check(src.indexOf('syncLibrary()') > -1, 'הוספה לא מסנכרנת את הספרייה');
   check(src.indexOf('location.reload') < 0, 'הוספה עדיין מרעננת את הדף');
 }
 
 /* 5m — המאגר והמסך הראשי נשענים על אותה ספרייה */
 {
   const src = win.eval('openStore.toString()');
-  check(src.indexOf('loadLibrary()') > -1, 'המאגר שואל את השרת בנפרד מהמסך הראשי');
+  check(src.indexOf('syncLibrary()') > -1, 'המאגר שואל את השרת בנפרד מהמסך הראשי');
   check(src.indexOf('fetchMine()') < 0, 'המאגר עדיין מושך רשימה נפרדת');
   check(src.indexOf('LIB.rows.filter') > -1, 'המאגר לא נגזר מהספרייה');
 
@@ -597,6 +599,94 @@ try {
   })()`));
   check(both.onHome === 1, 'נושא בבעלותי לא הופיע במסך הראשי');
   check(both.mine === 1, 'נושא בבעלותי לא זוהה כשלי');
+}
+
+/* 5n — יציבות המפגש: רענון יחיד, סיווג כשלים, ואין ניתוק על תקלת רשת */
+{
+  /* כל מסלול שמרענן חייב לעבור דרך ensureToken. קריאה ישירה ל-doRefresh
+     ממקומות שונים שורפת טוקני רענון מסובבים אחד לשני. */
+  ['rest', 'callFn', 'verifyAccess', 'loadIdentity'].forEach(function(fn){
+    const body = win.eval(fn + '.toString()');
+    if (body.indexOf('doRefresh(') > -1) fail.push(fn + ' קורא ל-doRefresh במקום ל-ensureToken');
+  });
+
+  /* רענון יחיד: קריאות מקבילות חייבות לחלוק את אותה בקשה. נמדד לפי
+     זהות ההבטחה ולא לפי מונה, כדי לא לספור רענון שכבר היה באוויר. */
+  const single = JSON.parse(await win.eval(`(function(){
+    const save = AUTH, realFetch = fetch;
+    let calls = 0;
+    const exp = Math.floor(Date.now()/1000) - 10;
+    AUTH = {access:'h.' + btoa(JSON.stringify({exp:exp})) + '.s', refresh:'r', uid:'u'};
+    SESSION.refreshing = null;
+    fetch = function(){
+      calls++;
+      return Promise.resolve({ok:true, json:function(){
+        const good = Math.floor(Date.now()/1000) + 3600;
+        return Promise.resolve({access_token:'h.' + btoa(JSON.stringify({exp:good})) + '.s',
+                                refresh_token:'r2'});
+      }});
+    };
+    const a = ensureToken(), b = ensureToken(), c = ensureToken();
+    const shared = (a === b) && (b === c);
+    const started = calls;
+    return Promise.all([a, b, c]).then(function(r){
+      fetch = realFetch;
+      const out = {shared:shared, started:started, results:r, uid:AUTH && AUTH.uid};
+      AUTH = save;
+      return JSON.stringify(out);
+    });
+  })()`));
+  check(single.shared, 'קריאות רענון מקבילות לא חלקו בקשה אחת');
+  check(single.started === 1, 'הרענון שלח ' + single.started + ' בקשות במקום אחת');
+  check(single.results.join(',') === 'true,true,true', 'רענון מקבילי לא הצליח לכולם');
+  check(single.uid === 'u', 'הרענון איבד את uid');
+
+  /* תקלת רשת ברענון אינה מנתקת */
+  const transient = JSON.parse(await win.eval(`(function(){
+    const save = AUTH, realFetch = fetch;
+    AUTH = {access:'h.' + btoa(JSON.stringify({exp:1})) + '.s', refresh:'r', uid:'u'};
+    SESSION.refreshing = null;
+    fetch = function(){ return Promise.reject(new Error('אין רשת')); };
+    return doRefresh().then(function(res){
+      fetch = realFetch;
+      const out = {res:res, stillIn: !!AUTH};
+      AUTH = save;
+      return JSON.stringify(out);
+    });
+  })()`));
+  check(transient.res === 'transient', 'תקלת רשת סווגה כניתוק');
+  check(transient.stillIn, 'תקלת רשת ניתקה את המשתמש');
+
+  check(win.eval('scheduleRefresh.toString()').indexOf('120000') > -1,
+    'אין רענון יזום לפני הפקיעה');
+}
+
+/* 5o — כל שינוי מסתנכרן בעצמו, בלי פעולה ידנית */
+{
+  const store = win.eval('renderStore.toString()');
+  ['data-del', 'data-pub', 'data-sub'].forEach(function(){});
+  check(store.indexOf('mutate(function(){ return deleteDeck') > -1, 'מחיקה לא מסנכרנת');
+  check(store.indexOf('mutate(function(){ return setVisibility') > -1, 'פרסום לא מסנכרן');
+  check(store.indexOf('mutate(function(){ return isSub') > -1, 'מינוי לא מסנכרן');
+  check(store.indexOf('return Promise.all(dups.map') > -1, 'ניקוי כפילויות לא מסנכרן');
+
+  /* mutate תמיד מסנכרן אחרי הפעולה */
+  const order = JSON.parse(await win.eval(`(function(){
+    const realLoad = loadLibrary;
+    const seen = [];
+    loadLibrary = function(){ seen.push('sync'); return Promise.resolve({ok:true, data:LIB.rows}); };
+    syncing = null;
+    return mutate(function(){ seen.push('work'); return Promise.resolve('done'); })
+      .then(function(out){
+        loadLibrary = realLoad;
+        return JSON.stringify({seen:seen, out:out});
+      });
+  })()`));
+  check(order.seen.join(',') === 'work,sync', 'סדר הפעולות: ' + order.seen.join(','));
+  check(order.out === 'done', 'mutate לא מחזיר את תוצאת הפעולה');
+
+  check(win.eval('syncLibrary.toString()').indexOf('if(syncing) return syncing') > -1,
+    'סנכרונים מקבילים לא מתאחדים');
 }
 
 /* 6 — בלי מפגש שמור, מסך הנעילה מופיע ושום דבר אחר לא */
