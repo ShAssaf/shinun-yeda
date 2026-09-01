@@ -481,6 +481,14 @@ try {
             const t = explainText(q, correct, other);
             if(!t.question || !String(t.question).trim()) bad.push(d.id+'/'+m.id+' שאלה ריקה');
             if(!t.answer   || !String(t.answer).trim())   bad.push(d.id+'/'+m.id+' תשובה ריקה');
+            /* התשובה חייבת לזהות את הפריט, לא רק להיות מחרוזת כלשהי */
+            if(q.optionKind === 'pic'){
+              if(!q.prompt.main || t.answer.indexOf(q.prompt.main) < 0)
+                bad.push(d.id+'/'+m.id+' תשובה לא מזהה את המבנה');
+            } else if(correct && correct.main){
+              if(t.answer.indexOf(correct.main) < 0)
+                bad.push(d.id+'/'+m.id+' תשובה לא מזהה את הפריט');
+            }
           });
         }
       });
