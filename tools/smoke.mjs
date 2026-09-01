@@ -241,6 +241,22 @@ try {
   check(b.noAnswer === b.before, 'כישלון משיכה לא נפל חזרה לתוכן המוטמע');
 }
 
+/* 5b2 — זיהוי כפילויות שומר את הראשון שנוצר */
+{
+  const r = JSON.parse(win.eval(`(function(){
+    const mine = [
+      {id:'b', kind:'groups', title:'א', created_at:'2026-01-02'},
+      {id:'a', kind:'groups', title:'א', created_at:'2026-01-01'},
+      {id:'c', kind:'groups', title:'א', created_at:'2026-01-03'},
+      {id:'d', kind:'topic',  title:'ב', created_at:'2026-01-01'}
+    ];
+    return JSON.stringify(duplicateDecks(mine).map(function(x){ return x.id; }));
+  })()`));
+  check(r.length === 2, `זוהו ${r.length} כפילויות במקום 2`);
+  check(r.indexOf('a') < 0, 'הניקוי היה מוחק את הנושא הראשון שנוצר');
+  check(r.indexOf('d') < 0, 'נושא ייחודי סומן ככפילות');
+}
+
 /* 5c2 — משיכת ספרייה לא מוחקת את המראה כשהיא לא מצליחה לענות */
 {
   /* משיכה אסינכרונית ותלוית שרת; נבדק כאן החוזה שמונע מחיקת המראה */

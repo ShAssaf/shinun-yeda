@@ -1162,8 +1162,8 @@ function fetchStore(){
 }
 function fetchMine(){
   if(!canSync() || !AUTH.uid) return Promise.resolve([]);
-  return rest('decks?select=id,kind,title,subtitle,item_count,owner_id,visibility,updated_at'
-              + '&owner_id=eq.' + AUTH.uid + '&order=updated_at.desc')
+  return rest('decks?select=id,kind,title,subtitle,item_count,owner_id,visibility,created_at,updated_at'
+              + '&owner_id=eq.' + AUTH.uid + '&order=created_at.asc')
     .then(function(r){ return r.ok ? r.json() : []; })
     .catch(function(){ return []; });
 }
@@ -1186,6 +1186,23 @@ function unsubscribe(deckId){
   return rest('deck_subscriptions?deck_id=eq.' + deckId + '&user_id=eq.' + AUTH.uid,
               {method:'DELETE', headers:restHeaders()});
 }
+function deleteDeck(deckId){
+  return rest('decks?id=eq.' + deckId, {method:'DELETE', headers:restHeaders()});
+}
+
+/* כפילות = אותו סוג ואותה כותרת בבעלות אותו משתמש. שומרים את הראשון
+   שנוצר, כי אליו הועברה היסטוריית התזמון. */
+function duplicateDecks(mine){
+  const byKey = {}, dups = [];
+  mine.slice().sort(function(a,b){
+    return (a.created_at||'').localeCompare(b.created_at||'') || a.id.localeCompare(b.id);
+  }).forEach(function(d){
+    const k = d.kind + '|' + d.title;
+    if(byKey[k]) dups.push(d); else byKey[k] = d;
+  });
+  return dups;
+}
+
 function setVisibility(deckId, vis){
   return rest('decks?id=eq.' + deckId, {
     method:'PATCH',
@@ -1237,7 +1254,12 @@ function importStarter(){
   return ready.then(function(){
     if(!AUTH || !AUTH.uid) return {ok:false, error:'לא הצלחתי לזהות את המשתמש. התחבר מחדש.'};
 
-    const rows = starterRows(AUTH.uid);
+    return fetchMine().then(function(existing){
+    /* דילוג על מה שכבר בבעלותי — לחיצה נוספת לא תיצור כפילות */
+    const have = {};
+    (existing||[]).forEach(function(d){ have[d.kind + '|' + d.title] = true; });
+    const rows = starterRows(AUTH.uid).filter(function(r){ return !have[r.kind + '|' + r.title]; });
+    if(!rows.length) return {ok:true, count:0, note:'הכול כבר קיים אצלך.'};
     const payload = starterPayload(rows);
 
     return rest('decks', {
@@ -1264,6 +1286,7 @@ function importStarter(){
           });
         })).then(function(){ return {ok:true, count:created.length}; });
       });
+    });
     });
   }).catch(function(err){
     return {ok:false, error:'נכשל: ' + (err && err.message ? err.message : 'שגיאה לא ידועה')};
@@ -2311,13 +2334,15 @@ function renderStore(){
       '<span>'+count+' כרטיסים'+(d.subtitle ? ' · '+esc(d.subtitle) : '')+'</span></div>'+
       (mine
         ? '<button class="act'+(pub?' on':'')+'" data-pub="'+d.id+'" data-to="'+(pub?'private':'public')+'">'+
-            (pub?'הפוך לפרטית':'פרסם')+'</button>'
+            (pub?'הפוך לפרטי':'פרסם')+'</button>'+
+          '<button class="act danger" data-del="'+d.id+'" aria-label="מחק">✕</button>'
         : '<button class="act'+(isSub(d.id)?' on danger':'')+'" data-sub="'+d.id+'">'+
             (isSub(d.id)?'הסר':'הוסף')+'</button>')+
     '</div>';
   }
 
   const mine = view.mine || [], others = view.others || [];
+  const dups = duplicateDecks(mine);
   app.innerHTML =
   '<div class="bar">'+
     '<button class="icon-btn" id="backBtn" aria-label="חזרה">'+icon('arrow')+'</button>'+
@@ -2326,7 +2351,15 @@ function renderStore(){
   '<div class="store-wrap">'+
     (view.loading ? '<p class="note">טוען…</p>' : '')+
     (view.err ? '<p class="note">'+esc(view.err)+'</p>' : '')+
-    (mine.length ? '<div class="store-sec"><h3>החבילות שלי</h3>'+
+    (dups.length
+      ? '<div class="panel share"><div class="share-row">'+
+          '<div><strong>נמצאו '+dups.length+' כפילויות</strong>'+
+          '<span>אותו נושא נוצר יותר מפעם אחת. הניקוי משאיר את הראשון שנוצר, '+
+            'זה שאליו הועברה היסטוריית התזמון.</span></div>'+
+          '<button class="act danger" id="dedupBtn">נקה</button>'+
+        '</div></div>'
+      : '')+
+    (mine.length ? '<div class="store-sec"><h3>הנושאים שלי</h3>'+
        mine.map(function(d){ return card(d, true); }).join('')+'</div>' : '')+
     '<div class="store-sec"><h3>פורסמו על ידי אחרים</h3>'+
       (others.length
@@ -2367,6 +2400,28 @@ function renderStore(){
       }
       return loadLibrary().then(function(){ openStore(); });
     });
+  });
+
+  Array.prototype.forEach.call(app.querySelectorAll('[data-del]'), function(b){
+    b.addEventListener('click', function(){
+      const d = (view.mine||[]).filter(function(x){ return x.id===b.dataset.del; })[0] || {};
+      if(!confirm('למחוק את "'+(d.title||'')+'"? הפעולה אינה הפיכה.')) return;
+      b.disabled = true;
+      deleteDeck(b.dataset.del)
+        .then(function(){ return loadLibrary(); })
+        .then(function(){ openStore(); })
+        .catch(function(){ b.disabled = false; });
+    });
+  });
+
+  const dd = app.querySelector('#dedupBtn');
+  if(dd) dd.addEventListener('click', function(){
+    if(!confirm('למחוק '+dups.length+' כפילויות? הראשון שנוצר בכל נושא יישמר.')) return;
+    dd.disabled = true; dd.textContent = 'מנקה…';
+    Promise.all(dups.map(function(d){ return deleteDeck(d.id); }))
+      .then(function(){ return loadLibrary(); })
+      .then(function(){ openStore(); })
+      .catch(function(){ dd.disabled = false; dd.textContent = 'נקה'; });
   });
 
   Array.prototype.forEach.call(app.querySelectorAll('[data-pub]'), function(b){
