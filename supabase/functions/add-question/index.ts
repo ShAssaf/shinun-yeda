@@ -204,11 +204,26 @@ Deno.serve(async (req) => {
     if (!v) return json({ error: `חסר משתנה סביבה: ${k}` }, 500);
   }
 
-  let body: { passphrase?: string; request?: string; deck?: string };
+  let body: { passphrase?: string; request?: string; deck?: string; check?: boolean };
   try { body = await req.json(); } catch { return json({ error: 'גוף הבקשה אינו JSON' }, 400); }
 
   if (!body.passphrase || !safeEqual(body.passphrase, env.pass!))
     return json({ error: 'סיסמה שגויה' }, 401);
+
+  /* בדיקת תקינות — מאמתת את שני המפתחות בלי לכתוב כלום ובלי לצרוך טוקנים */
+  if (body.check) {
+    const out: Record<string, string> = { repo: env.repo! };
+    try {
+      await gh(`/repos/${env.repo}/contents/data/decks.json`, env.token!);
+      out.github = 'תקין — קריאה עובדת';
+    } catch (e) { out.github = 'שגיאה: ' + (e as Error).message; }
+    try {
+      await new Anthropic({ apiKey: env.key }).models.list({ limit: 1 });
+      out.anthropic = 'תקין — המפתח מאומת';
+    } catch (e) { out.anthropic = 'שגיאה: ' + (e as Error).message.slice(0, 160); }
+    out.model = env.model!;
+    return json(out, 200);
+  }
 
   const ask = (body.request ?? '').trim();
   if (!ask) return json({ error: 'הבקשה ריקה' }, 400);
