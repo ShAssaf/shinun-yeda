@@ -3,6 +3,7 @@
      dist/artifact.html — קובץ בודד להעלאה כארטיפקט: גופנים מ-Google Fonts
    שימוש:  node tools/build.mjs        */
 import { readFile, writeFile, mkdir, access } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -22,6 +23,13 @@ const PWA_TAIL = `
 if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
   addEventListener('load', function () {
     navigator.serviceWorker.register('./sw.js').catch(function () {});
+  });
+  /* גרסה חדשה תפסה שליטה — נטענים מחדש פעם אחת כדי להציג אותה */
+  var swReloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', function () {
+    if (swReloaded) return;
+    swReloaded = true;
+    location.reload();
   });
 }
 </script>
@@ -57,6 +65,14 @@ pwa = pwa.replace(/(<\/title>\n)/, '$1' + PWA_HEAD) + PWA_TAIL;
 await mkdir(join(ROOT, 'www'), { recursive: true });
 await writeFile(join(ROOT, 'www', 'index.html'), pwa, 'utf8');
 
+/* ---- www/sw.js ---- */
+/* חותמים את ה-SW בטביעת אצבע של הדף, כך שכל דיפלוי מתקין אותו מחדש
+   ומפנה את הקאש הישן. בלי זה הגרסה הראשונה שנתפסה נשארת לנצח. */
+const stamp = createHash('sha256').update(pwa).digest('hex').slice(0, 12);
+const sw = (await readFile(join(ROOT, 'src', 'sw.js'), 'utf8')).replace('__BUILD__', stamp);
+if (sw.includes('__BUILD__')) throw new Error('לא הוחלף מציין הגרסה ב-sw.js');
+await writeFile(join(ROOT, 'www', 'sw.js'), sw, 'utf8');
+
 /* ---- dist/artifact.html ---- */
 await mkdir(join(ROOT, 'dist'), { recursive: true });
 await writeFile(join(ROOT, 'dist', 'artifact.html'), withData, 'utf8');
@@ -66,5 +82,5 @@ const counts = ['groups', 'elements', 'iso', 'isoTerms', 'isoPairs']
 console.log('www/index.html %d KB (גופנים %s) · dist/artifact.html %d KB',
   Math.round(pwa.length / 1024), offlineFonts ? 'מוטמעים' : 'מ-Google',
   Math.round(withData.length / 1024));
-console.log('תוכן: %s', counts);
+console.log('תוכן: %s · גרסת SW %s', counts, stamp);
 console.log('כפתור הוספת שאלה: %s', cfg.addQuestionUrl ? 'פעיל' : 'כבוי (data/config.json ריק)');

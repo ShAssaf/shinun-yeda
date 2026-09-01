@@ -6,6 +6,7 @@ dist/
 www/index.html
 www/fonts.css
 www/icons/
+www/sw.js
 
 # פרויקט אנדרואיד — הקוד נשמר, תוצרי הבנייה לא
 android/build/
