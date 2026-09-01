@@ -197,6 +197,35 @@ try {
   fail.push('מסך העיון נפל: ' + e.message);
 }
 
+/* 5b — החנות נרנדרת גם כשהשרת לא זמין, ומבחינה בין שלי לשל אחרים */
+try {
+  win.eval(`(function(){
+    quiz = null;
+    view = {name:'store', loading:false, subs:['s1'],
+      mine:[{id:'m1', title:'שלי פרטית', item_count:9, visibility:'private'},
+            {id:'m2', title:'שלי ציבורית', item_count:4, visibility:'public'}],
+      others:[{id:'s1', title:'של אחר', item_count:7, visibility:'public'},
+              {id:'s2', title:'עוד אחד', item_count:5, visibility:'public'}]};
+    render();
+  })()`);
+  const cards = document.querySelectorAll('.scard').length;
+  check(cards === 4, `החנות הציגה ${cards} חבילות במקום 4`);
+  check(document.querySelectorAll('[data-pub]').length === 2, 'אין כפתורי פרסום לחבילות שלי');
+  check(document.querySelectorAll('[data-sub]').length === 2, 'אין כפתורי מינוי לחבילות של אחרים');
+  /* חבילה שאני רשום אליה מוצגת כ"הסר", ואחת שלא — כ"הוסף" */
+  const subBtns = Array.from(document.querySelectorAll('[data-sub]'));
+  const joined = subBtns.find((b) => b.dataset.sub === 's1');
+  const free = subBtns.find((b) => b.dataset.sub === 's2');
+  check(joined?.textContent.trim() === 'הסר', 'מינוי קיים לא סומן');
+  check(free?.textContent.trim() === 'הוסף', 'חבילה שלא נרשמתי אליה סומנה כרשומה');
+  /* פרטית מציעה לפרסם, ציבורית מציעה להפוך לפרטית */
+  const pubBtns = Array.from(document.querySelectorAll('[data-pub]'));
+  check(pubBtns.find((b) => b.dataset.pub === 'm1')?.dataset.to === 'public', 'פרטית לא מציעה פרסום');
+  check(pubBtns.find((b) => b.dataset.pub === 'm2')?.dataset.to === 'private', 'ציבורית לא מציעה החזרה לפרטית');
+} catch (e) {
+  fail.push('מסך החנות נפל: ' + e.message);
+}
+
 /* 6 — בלי מפגש שמור, מסך הנעילה מופיע ושום דבר אחר לא */
 {
   const locked = new JSDOM(html, {

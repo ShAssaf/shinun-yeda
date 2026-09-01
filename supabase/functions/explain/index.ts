@@ -30,21 +30,20 @@ async function authorize(req: Request, body: { passphrase?: string }, pass: stri
   if (bearer) {
     const url = Deno.env.get('SUPABASE_URL')?.trim();
     const anon = Deno.env.get('SUPABASE_ANON_KEY')?.trim();
-    if (!url || !anon) return { ok: false, msg: 'הגדרות Supabase חסרות בפונקציה' };
+    if (!url || !anon) return { ok: false, editor: false, msg: 'הגדרות Supabase חסרות בפונקציה' };
     const r = await fetch(`${url}/auth/v1/user`, {
       headers: { apikey: anon, Authorization: `Bearer ${bearer}` },
     });
-    if (!r.ok) return { ok: false, msg: 'ההתחברות פגה. התחבר שוב.' };
+    if (!r.ok) return { ok: false, editor: false, msg: 'ההתחברות פגה. התחבר שוב.' };
     const user = await r.json() as { email?: string };
     const allowed = (Deno.env.get('ALLOWED_EMAILS') ?? '')
       .split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
-    if (!allowed.length) return { ok: false, msg: 'ALLOWED_EMAILS לא מוגדר.' };
-    if (!allowed.includes((user.email ?? '').toLowerCase()))
-      return { ok: false, msg: 'החשבון אינו מורשה.' };
-    return { ok: true };
+    /* התחברות פתוחה לכולם; עריכה שמוציאה כסף או נוגעת בקוד — רק לרשימה */
+    const editor = allowed.includes((user.email ?? '').toLowerCase());
+    return { ok: true, editor, msg: editor ? '' : 'החשבון אינו מורשה לעריכה.' };
   }
-  if (body.passphrase && safeEqual(body.passphrase, pass)) return { ok: true };
-  return { ok: false, msg: 'נדרשת התחברות' };
+  if (body.passphrase && safeEqual(body.passphrase, pass)) return { ok: true, editor: true, msg: '' };
+  return { ok: false, editor: false, msg: 'נדרשת התחברות' };
 }
 
 const SYSTEM = `אתה מסביר לסטודנט לרפואה שטעה בשאלת שינון בביוכימיה.
@@ -73,7 +72,8 @@ Deno.serve(async (req) => {
 
   /* בדיקת הרשאה בלבד — בלי קריאה למודל. הלקוח קורא לזה פעם אחר התחברות,
      כדי שרשימת המורשים תישאר בשרת ולא תודלף בקוד הצד־לקוחי. */
-  if (body.verify) return json({ ok: true });
+  if (body.verify) return json({ ok: true, editor: auth.editor });
+  if (!auth.editor) return json({ error: auth.msg }, 403);
 
   const question = (body.question ?? '').slice(0, 600);
   const answer = (body.answer ?? '').slice(0, 600);

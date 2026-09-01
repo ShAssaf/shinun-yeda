@@ -88,21 +88,20 @@ async function authorize(req: Request, body: { passphrase?: string }, pass: stri
   if (bearer) {
     const url = Deno.env.get('SUPABASE_URL')?.trim();
     const anon = Deno.env.get('SUPABASE_ANON_KEY')?.trim();
-    if (!url || !anon) return { ok: false, msg: 'הגדרות Supabase חסרות בפונקציה' };
+    if (!url || !anon) return { ok: false, editor: false, msg: 'הגדרות Supabase חסרות בפונקציה' };
     const r = await fetch(`${url}/auth/v1/user`, {
       headers: { apikey: anon, Authorization: `Bearer ${bearer}` },
     });
-    if (!r.ok) return { ok: false, msg: 'ההתחברות פגה. התחבר שוב.' };
+    if (!r.ok) return { ok: false, editor: false, msg: 'ההתחברות פגה. התחבר שוב.' };
     const user = await r.json() as { email?: string };
     const allowed = (Deno.env.get('ALLOWED_EMAILS') ?? '')
       .split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
-    if (!allowed.length) return { ok: false, msg: 'ALLOWED_EMAILS לא מוגדר — אף חשבון אינו מורשה.' };
-    const email = (user.email ?? '').toLowerCase();
-    if (!allowed.includes(email)) return { ok: false, msg: `החשבון ${email} אינו מורשה.` };
-    return { ok: true, who: email };
+    /* התחברות פתוחה לכולם; עריכה שמוציאה כסף או נוגעת בקוד — רק לרשימה */
+    const editor = allowed.includes((user.email ?? '').toLowerCase());
+    return { ok: true, editor, msg: editor ? '' : 'החשבון אינו מורשה לעריכה.' };
   }
-  if (body.passphrase && safeEqual(body.passphrase, pass)) return { ok: true, who: 'passphrase' };
-  return { ok: false, msg: 'נדרשת התחברות' };
+  if (body.passphrase && safeEqual(body.passphrase, pass)) return { ok: true, editor: true, msg: '' };
+  return { ok: false, editor: false, msg: 'נדרשת התחברות' };
 }
 
 const SYSTEM = `אתה עורך את קוד המקור של אפליקציית שינון לביוכימיה.
@@ -158,6 +157,7 @@ Deno.serve(async (req) => {
   try { body = await req.json(); } catch { return json({ error: 'גוף הבקשה אינו JSON' }, 400); }
   const auth = await authorize(req, body, env.pass!);
   if (!auth.ok) return json({ error: auth.msg }, 401);
+  if (!auth.editor) return json({ error: auth.msg }, 403);
 
   try {
     /* ---------- ביטול השינוי האחרון ---------- */
