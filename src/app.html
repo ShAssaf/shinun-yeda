@@ -1246,15 +1246,24 @@ const LIB = {
 };
 let pendingShare = null;                 /* נושא שהגיע בקישור לפני התחברות */
 
-function rest(path, init){
+function rest(path, init, retried){
   const where = (init && init.method ? init.method : 'GET') + ' ' + path.split('?')[0];
-  return fetch(CFG.supabaseUrl + '/rest/v1/' + path,
-    Object.assign({headers: restHeaders()}, init || {}))
-    .then(function(r){ return logFetch(where, r); })
-    .catch(function(err){
-      logError('fetch', where + ' → ' + (err && err.message ? err.message : 'נכשל'), null);
-      throw err;
-    });
+  return ensureToken().then(function(){
+    return fetch(CFG.supabaseUrl + '/rest/v1/' + path,
+      Object.assign({}, init || {}, {headers: restHeaders()}));
+  }).then(function(r){
+    /* 401 אחרי רענון מקדים = הטוקן באמת פסול; מנסים רענון אחד ואז נכנעים */
+    if(r.status === 401 && !retried && AUTH && AUTH.refresh){
+      return refreshToken().then(function(ok){
+        if(!ok) return logFetch(where, r);
+        return rest(path, init, true);
+      });
+    }
+    return logFetch(where, r);
+  }).catch(function(err){
+    logError('fetch', where + ' → ' + (err && err.message ? err.message : 'נכשל'), null);
+    throw err;
+  });
 }
 
 /* הספרייה = הנושאים שבבעלותי ∪ אלה שנרשמתי אליהם.
@@ -2153,6 +2162,31 @@ function loadIdentity(){
     }).catch(function(){});   /* אופליין — משאירים את המשתמש בפנים */
 }
 
+/* פענוח exp מתוך ה-JWT. טוקן הגישה חי שעה, ורענון היה ממומש רק
+   בקריאות לפונקציות — ולכן אחרי שעה כל שאילתה למסד חזרה 401
+   והאפליקציה נפלה למטמון בשקט. */
+function tokenExp(){
+  if(!AUTH || !AUTH.access) return 0;
+  try{
+    const part = AUTH.access.split('.')[1];
+    const pad = part.replace(/-/g,'+').replace(/_/g,'/');
+    const payload = JSON.parse(atob(pad + '==='.slice((pad.length + 3) % 4)));
+    return (payload.exp || 0) * 1000;
+  }catch(e){ return 0; }
+}
+function tokenStale(){
+  const exp = tokenExp();
+  return exp > 0 && Date.now() > exp - 60000;   /* דקה מרווח */
+}
+
+let refreshing = null;
+function ensureToken(){
+  if(!AUTH || !AUTH.access) return Promise.resolve(false);
+  if(!tokenStale()) return Promise.resolve(true);
+  if(!refreshing) refreshing = refreshToken().then(function(ok){ refreshing = null; return ok; });
+  return refreshing;
+}
+
 function refreshToken(){
   if(!AUTH || !AUTH.refresh) return Promise.resolve(false);
   return fetch(CFG.supabaseUrl + '/auth/v1/token?grant_type=refresh_token', {
@@ -2161,8 +2195,20 @@ function refreshToken(){
     body: JSON.stringify({ refresh_token: AUTH.refresh })
   }).then(function(r){ return r.ok ? r.json() : null; })
     .then(function(j){
-      if(!j || !j.access_token){ AUTH=null; authWrite(null); return false; }
-      AUTH = {access:j.access_token, refresh:j.refresh_token, email:AUTH.email};
+      if(!j || !j.access_token){
+        /* גם טוקן הרענון פג — אין דרך חזרה בלי התחברות מחדש */
+        AUTH = null; authWrite(null);
+        try{ localStorage.removeItem(VERIFY_KEY); }catch(e){}
+        view = {name:'home', lockErr:'ההתחברות פגה. התחבר שוב.'};
+        render();
+        return false;
+      }
+      /* שומרים את שאר הזהות. בנייה מחדש של האובייקט מחקה את uid,
+         ובלעדיו כל שאילתה למסד חזרה 401 — זה היה השורש. */
+      AUTH = Object.assign({}, AUTH, {
+        access: j.access_token,
+        refresh: j.refresh_token || AUTH.refresh
+      });
       authWrite(AUTH);
       return true;
     }).catch(function(){ return false; });
@@ -2553,7 +2599,9 @@ function renderStore(){
     '<div class="diag">'+
       '<div><b>מצב</b></div>'+
       '<div>זהות: '+(AUTH && AUTH.uid ? '✓ ' + esc(String(AUTH.uid).slice(0,8)) : '✗ חסרה') +
-        ' · הרשאת עריכה: '+((AUTH && AUTH.editor) ? '✓' : '✗')+'</div>'+
+        ' · עריכה: '+((AUTH && AUTH.editor) ? '✓' : '✗') +
+        ' · טוקן: '+(tokenExp() ? (tokenStale() ? 'פג' : 'תקף עד ' +
+          new Date(tokenExp()).toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})) : '—')+'</div>'+
       '<div>מהשרת: '+(view.mine||[]).length+' שלי · '+(view.others||[]).length+' של אחרים · '+
         (view.subs||[]).length+' מינויים</div>'+
       '<div>ספרייה: '+esc(LIB.status)+(LIB.reason ? ' ('+esc(LIB.reason)+')' : '')+
@@ -2906,7 +2954,8 @@ function boot(){
     return Promise.resolve();
   }
 
-  return loadIdentity()              /* זהות אחת, לפני כל השאר */
+  return ensureToken()               /* טוקן תקף לפני כל קריאה */
+    .then(loadIdentity)              /* זהות אחת, לפני כל השאר */
     .then(function(){
       if(!AUTH){ render(); return; }
       /* מכאן והלאה יש uid, ואפשר לשגר במקביל */

@@ -433,6 +433,33 @@ try {
   check(coalesced.after === 1, 'renderNow לא צייר בדיוק פעם אחת');
 }
 
+/* 5h — רענון טוקן משמר את הזהות; פקיעה מזוהה מראש */
+{
+  const src = win.eval('refreshToken.toString()');
+  check(src.indexOf('Object.assign({}, AUTH') > -1,
+    'רענון בונה את הזהות מחדש ומוחק את uid');
+  check(src.indexOf('lockErr') > -1, 'כישלון רענון לא מחזיר למסך התחברות');
+
+  const restSrc = win.eval('rest.toString()');
+  check(restSrc.indexOf('ensureToken()') > -1, 'קריאה למסד לא מוודאת טוקן תקף');
+  check(restSrc.indexOf('r.status === 401') > -1, 'קריאה למסד לא מנסה שוב אחרי 401');
+
+  /* קריאת exp מתוך JWT */
+  const exp = JSON.parse(win.eval(`(function(){
+    const save = AUTH;
+    const body = btoa(JSON.stringify({exp: Math.floor(Date.now()/1000) - 10}));
+    AUTH = {access: 'h.' + body + '.s', refresh: 'r'};
+    const stale = tokenStale();
+    const body2 = btoa(JSON.stringify({exp: Math.floor(Date.now()/1000) + 3600}));
+    AUTH = {access: 'h.' + body2 + '.s', refresh: 'r'};
+    const fresh = tokenStale();
+    AUTH = save;
+    return JSON.stringify({stale:stale, fresh:fresh});
+  })()`));
+  check(exp.stale === true, 'טוקן שפג לא זוהה');
+  check(exp.fresh === false, 'טוקן תקף סומן כפג');
+}
+
 /* 6 — בלי מפגש שמור, מסך הנעילה מופיע ושום דבר אחר לא */
 {
   const locked = new JSDOM(html, {
