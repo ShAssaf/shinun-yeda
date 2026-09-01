@@ -63,6 +63,12 @@ for (const deck of DECKS ?? []) {
         break;
       }
       if (!qs?.length) { fail.push(`${deck.id}/${mode.id}: לא נוצרו שאלות`); break; }
+      /* סבב חייב להיות באורך המבוקש כשיש מספיק פריטים */
+      const want = Math.min(12, deck.items.length);
+      if (qs.length < want && mode.id !== 'pair') {
+        fail.push(`${deck.id}/${mode.id}: ${qs.length} שאלות במקום ${want}`);
+        break;
+      }
       for (const q of qs) {
         if (q.options?.length !== 4) { fail.push(`${deck.id}/${mode.id}: ${q.options?.length} אפשרויות במקום 4`); break; }
         if (!q.options.some((o) => o.id === q.answer)) { fail.push(`${deck.id}/${mode.id}: התשובה לא בין האפשרויות`); break; }
@@ -130,6 +136,33 @@ try {
     return out[0].id;
   })()`);
   check(order === 'due', 'המתזמן לא הקדים את הכרטיס שהגיע זמנו');
+}
+
+/* 4b — תאריך מבחן חותך אינטרוולים, וסבב מאוחד נבנה מכל החבילות */
+{
+  const capped = win.eval(`(function(){
+    const before = nextInterval(200);
+    store.examDate = new Date(Date.now() + 10*86400000).toISOString().slice(0,10);
+    const after = nextInterval(200);
+    const days = examDaysLeft();
+    store.examDate = null;
+    return JSON.stringify({before:before, after:after, days:days, cap:5});
+  })()`);
+  const c = JSON.parse(capped);
+  check(c.before > c.after, `תאריך מבחן לא חתך את האינטרוול: ${c.before} → ${c.after}`);
+  check(c.after <= 5, `האינטרוול ${c.after} חורג מחצי הימים שנותרו`);
+  check(c.days >= 9 && c.days <= 11, `ספירת הימים למבחן שגויה: ${c.days}`);
+
+  try {
+    win.eval('startMixed()');
+    const q = win.eval('JSON.stringify({n:quiz.qs.length, deck:quiz.deck.id, keys:quiz.qs.map(x=>x.key.split(":")[0])})');
+    const info = JSON.parse(q);
+    check(info.deck === 'all', 'הסבב המאוחד לא סומן כחבילת all');
+    check(info.n > 0 && info.n <= 12, `הסבב המאוחד הכיל ${info.n} שאלות`);
+    check(new Set(info.keys).size > 1, 'הסבב המאוחד משך רק מחבילה אחת');
+  } catch (e) {
+    fail.push('הסבב המאוחד נפל: ' + e.message);
+  }
 }
 
 /* 5 — מסך העיון נבנה לכל חבילה, וכל פריט מקבל תיאור תקין */

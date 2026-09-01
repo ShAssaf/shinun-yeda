@@ -202,6 +202,7 @@ h1{
 .opt:disabled{cursor:default}
 .opt.dim{opacity:.42}
 
+.fb-wrap{display:flex;flex-direction:column;gap:8px}
 .feedback{
   min-height:52px;display:flex;align-items:center;gap:10px;border-radius:12px;
   padding:10px 13px;font-size:14px;line-height:1.5;border:1px solid transparent;
@@ -327,6 +328,26 @@ h1{
   display:grid;place-items:center;
 }
 .shot button:hover{background:var(--bad)}
+
+.btn.go{width:100%;font-size:16px;padding:15px}
+.why{
+  background:var(--surface-2);border:1px solid var(--line);border-radius:11px;
+  padding:10px 12px;font-size:13.5px;line-height:1.6;color:var(--ink);
+}
+.why-btn{
+  border:1px solid currentColor;border-radius:9px;padding:6px 12px;
+  font-size:13px;flex:none;
+}
+.exam{
+  display:block;width:100%;text-align:center;padding:9px;
+  font-size:12.5px;color:var(--ink-2);border:1px solid transparent;border-radius:11px;
+}
+.exam:hover{color:var(--accent);border-color:var(--line)}
+.alt-clear{
+  width:100%;text-align:center;padding:11px;font-size:13.5px;color:var(--ink-2);
+  border:1px solid var(--line);border-radius:12px;
+}
+.alt-clear:hover{color:var(--bad);border-color:var(--bad)}
 
 /* ---------- עיון ---------- */
 .browse-wrap{flex:1;display:flex;flex-direction:column;gap:12px;padding:4px 0 10px}
@@ -646,9 +667,22 @@ function forgetStability(d, s, r){
   const short = s / Math.exp(FSRS_W[17] * FSRS_W[18]);
   return Math.min(long, short);
 }
+/* תקרה לפי תאריך המבחן: אין טעם לתזמן כרטיס למועד שאחרי המבחן.
+   חצי מהימים שנותרו מבטיח לפחות חזרה אחת נוספת לפני המועד. */
+function intervalCap(){
+  const d = examDaysLeft();
+  if(d == null || d <= 0) return MAX_IVL;
+  return Math.max(1, Math.floor(d * 0.5));
+}
+function examDaysLeft(){
+  if(!store.examDate) return null;
+  const t = Date.parse(store.examDate + 'T23:59:59');
+  if(isNaN(t)) return null;
+  return Math.ceil((t - Date.now()) / DAY);
+}
 function nextInterval(s){
   const iv = (s / FSRS_FACTOR) * (Math.pow(RETENTION, 1 / FSRS_DECAY) - 1);
-  return Math.min(MAX_IVL, Math.max(1, Math.round(iv)));
+  return Math.min(MAX_IVL, intervalCap(), Math.max(1, Math.round(iv)));
 }
 
 /* ציון 1..4 מתוך תשובה רב־ברירתית: נכונות, ומהירות כאינדיקציה לביטחון */
@@ -775,6 +809,12 @@ function pullCards(){
       if(changed){ jwrite(CARDS_KEY, CARDS); render(); }
     }).catch(function(){});
 }
+
+/* הסברים — נשמרים מקומית, כך שכל כרטיס עולה קריאה אחת בלבד */
+const EXPLAIN_KEY = 'shinun-why';
+let WHY = jread(EXPLAIN_KEY, {});
+function whyFor(key){ return WHY[key] || null; }
+function whySave(key, text){ WHY[key] = text; jwrite(EXPLAIN_KEY, WHY); }
 
 /* ===========================================================
    מתזמן — מרכיב סבב מכרטיסים שהגיע זמנם, ואז חדשים,
@@ -963,9 +1003,11 @@ const DECKS = [
                               tag:(CATS[g.cat]||{}).he, tagColor:(CATS[g.cat]||{}).color}; },
   modes:dModes('fg', [{id:'s2n',glyph:'R–'},{id:'n2s',glyph:'Aa'},{id:'mix',glyph:'⇄'}]),
   legend:Object.keys(CATS).map(function(k){ return {color:CATS[k].color, he:CATS[k].he}; }),
-  build:function(mode){
-    fgQuestion.pool = pickWeighted(GROUPS, ROUND, function(g){return 'fg:'+g.id;});
-    const out=[]; for(let i=0;i<ROUND;i++) out.push(fgQuestion(mode));
+  build:function(mode, n){
+    n = n || ROUND;
+    fgQuestion.pool = pickWeighted(GROUPS, n, function(g){return 'fg:'+g.id;});
+    const count = fgQuestion.pool.length;          /* shift מקצר את המאגר תוך כדי */
+    const out=[]; for(let i=0;i<count;i++) out.push(fgQuestion(mode));
     return out;
   }
 },
@@ -976,9 +1018,11 @@ const DECKS = [
                               tagColor:e.cat==='bulk'?'var(--c-n)':'var(--c-s)'}; },
   modes:dModes('el', [{id:'sym',glyph:'Fe'},{id:'name',glyph:'שם'},{id:'class',glyph:'⊞'},{id:'mix',glyph:'⇄'}]),
   legend:dLegend('el', {bulk:'var(--c-n)', trace:'var(--c-s)'}),
-  build:function(mode){
-    elQuestion.pool = pickWeighted(ELEMENTS, ROUND, function(e){return 'el:'+e.id;});
-    const out=[]; for(let i=0;i<ROUND;i++) out.push(elQuestion(mode));
+  build:function(mode, n){
+    n = n || ROUND;
+    elQuestion.pool = pickWeighted(ELEMENTS, n, function(e){return 'el:'+e.id;});
+    const count = elQuestion.pool.length;          /* shift מקצר את המאגר תוך כדי */
+    const out=[]; for(let i=0;i<count;i++) out.push(elQuestion(mode));
     return out;
   }
 },
@@ -993,12 +1037,13 @@ const DECKS = [
                        {id:'pair',glyph:'A|B'},{id:'mix',glyph:'⇄'}]),
   legend:dLegend('iso', {structural:'var(--c-o)', stereo:'var(--c-n)',
                          config:'var(--c-p)', sub:'var(--c-s)'}),
-  build:function(mode){
-    isoQuestion.pool = pickWeighted(ISO_ALL, ROUND, function(n){return 'iso:'+n.id;});
-    isoQuestion.treePool = pickWeighted(ISO.filter(function(x){return x.parent;}), ROUND, function(n){return 'iso:'+n.id;});
+  build:function(mode, n){
+    n = n || ROUND;
+    isoQuestion.pool = pickWeighted(ISO_ALL, n, function(x){return 'iso:'+x.id;});
+    isoQuestion.treePool = pickWeighted(ISO.filter(function(x){return x.parent;}), n, function(x){return 'iso:'+x.id;});
     isoQuestion.pairPool = pickWeighted(ISO_PAIRS, ISO_PAIRS.length, function(p){return 'iso:'+p.id;});
-    const n = mode==='pair' ? Math.min(ROUND, ISO_PAIRS.length) : ROUND;
-    const out=[]; for(let i=0;i<n;i++) out.push(isoQuestion(mode));
+    const count = mode==='pair' ? Math.min(n, ISO_PAIRS.length) : n;
+    const out=[]; for(let i=0;i<count;i++) out.push(isoQuestion(mode));
     return out;
   }
 },
@@ -1046,10 +1091,10 @@ TOPICS.filter(function(t){ return t && Array.isArray(t.cards) && t.cards.length>
         {id:'mix', glyph:'⇄', title:'מעורב', desc:'שני הכיוונים באקראי'},
       ],
       legend:[{color:t.color || TOPIC_COLORS[i % TOPIC_COLORS.length], he:t.title}],
-      build:function(mode){
-        const n = Math.min(ROUND, t.cards.length);
-        topicQuestion.pool = pickWeighted(t.cards, n, function(c){ return 'tp:'+t.id+':'+c.id; });
-        const out=[]; for(let k=0;k<n;k++) out.push(topicQuestion(t, mode));
+      build:function(mode, n){
+        const count = Math.min(n || ROUND, t.cards.length);
+        topicQuestion.pool = pickWeighted(t.cards, count, function(c){ return 'tp:'+t.id+':'+c.id; });
+        const out=[]; for(let k=0;k<count;k++) out.push(topicQuestion(t, mode));
         return out;
       },
     });
@@ -1071,6 +1116,36 @@ function startQuiz(deckId, mode){
   view = {name:'quiz'};
   render();
 }
+/* סבב מאוחד — מושך את מה שהגיע זמנו מכל החבילות, בחלוקה יחסית.
+   זו נקודת הפתיחה הטבעית לאפליקציית חזרה מרווחת. */
+const ALL_DECK = {id:'all', title:'חזרה כללית', modes:[]};
+function defaultMode(d){
+  const ids = d.modes.map(function(m){ return m.id; });
+  return ids.indexOf('mix') > -1 ? 'mix' : ids[0];
+}
+function startMixed(){
+  const shares = DECKS.map(function(d){
+    return {d:d, due:dueCount(d.items, d.keyFn)};
+  }).filter(function(x){ return x.due > 0; });
+  const pool = shares.length ? shares
+    : DECKS.map(function(d){ return {d:d, due:d.items.length}; });
+
+  const total = pool.reduce(function(a,x){ return a + x.due; }, 0) || 1;
+  let left = ROUND, qs = [];
+  pool.forEach(function(x, i){
+    const n = i === pool.length - 1
+      ? left
+      : Math.max(1, Math.min(left - (pool.length - 1 - i), Math.round(ROUND * x.due / total)));
+    if(n <= 0) return;
+    left -= n;
+    qs = qs.concat(x.d.build(defaultMode(x.d), n));
+  });
+
+  quiz = {deck:ALL_DECK, mode:'mixed', qs:shuffle(qs).slice(0, ROUND), i:0, correct:0, misses:[]};
+  view = {name:'quiz'};
+  render();
+}
+
 function answer(optId){
   const q = quiz.qs[quiz.i];
   if(q.answered) return;
@@ -1114,6 +1189,40 @@ function icon(kind){
   return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 6l-6 6 6 6"/></svg>';
 }
 
+function examLabel(){
+  const d = examDaysLeft();
+  if(d == null) return 'הגדר תאריך מבחן';
+  if(d <= 0)    return 'המבחן עבר — הקש לעדכון';
+  return 'המבחן בעוד ' + d + (d === 1 ? ' יום' : ' ימים') +
+         ' · אין תזמון מעבר ל-' + intervalCap() + ' ימים';
+}
+function openExamSheet(){
+  const bg = document.createElement('div');
+  bg.className = 'sheet-bg';
+  bg.innerHTML =
+    '<div class="sheet" role="dialog" aria-modal="true" aria-label="תאריך המבחן">'+
+      '<div class="sheet-head"><h2>תאריך המבחן</h2><button id="exClose">סגור</button></div>'+
+      '<p class="hint">כשיש תאריך, אף כרטיס לא מתוזמן למועד שאחריו. '+
+        'ככל שמתקרבים, החזרות מתקרבות — עד שהשיא נוחת ביום המבחן.</p>'+
+      '<div><label for="exDate">מתי</label>'+
+        '<input id="exDate" type="date" value="'+esc(store.examDate||'')+'"></div>'+
+      '<button class="send" id="exSave">שמור</button>'+
+      (store.examDate ? '<button class="alt-clear" id="exClear">מחק תאריך</button>' : '')+
+    '</div>';
+  document.body.appendChild(bg);
+  function close(){ bg.remove(); }
+  bg.addEventListener('click', function(e){ if(e.target===bg) close(); });
+  bg.querySelector('#exClose').addEventListener('click', close);
+  bg.querySelector('#exSave').addEventListener('click', function(){
+    const v = bg.querySelector('#exDate').value;
+    store.examDate = v || null; saveState(store); close(); render();
+  });
+  const clr = bg.querySelector('#exClear');
+  if(clr) clr.addEventListener('click', function(){
+    store.examDate = null; saveState(store); close(); render();
+  });
+}
+
 function renderHome(){
   const cards = DECKS.map(function(d){
     const due = dueCount(d.items, d.keyFn);
@@ -1131,7 +1240,7 @@ function renderHome(){
   app.innerHTML =
   '<div class="home-wrap">'+
     '<header>'+
-      '<div class="eyebrow">ביוכימיה · הכנה למבחן</div>'+
+      '<div class="eyebrow">חזרה מרווחת · הכנה למבחן</div>'+
       '<h1>שינון</h1>'+
       '<p class="lede">חזרה מרווחת. כל כרטיס חוזר בדיוק לפני שהיית שוכח אותו.</p>'+
     '</header>'+
@@ -1140,7 +1249,12 @@ function renderHome(){
       '<div class="stat"><b dir="ltr">'+totalMastered+'<span style="font-size:14px;color:var(--ink-2)">/'+totalItems+'</span></b><span>נשלטים</span></div>'+
       '<div class="stat"><b>'+(store.rounds||0)+'</b><span>סבבים</span></div>'+
     '</div>'+
+    (totalDue
+      ? '<button class="btn primary go" id="goBtn">חזרה עכשיו · '+
+          Math.min(totalDue, ROUND)+' כרטיסים</button>'
+      : '<p class="note">אין כרטיסים לחזרה כרגע. אפשר להיכנס לחבילה ולתרגל בכל זאת.</p>')+
     '<div class="deck-list">'+cards+'</div>'+
+    '<button class="exam" id="examBtn">'+examLabel()+'</button>'+
     (CFG.addQuestionUrl
       ? '<button class="add-btn" id="addBtn">'+icon('plus')+' הוסף שאלה או תקן טעות</button>'
       : '<p class="note">רוצה נושא נוסף — תגיד לי בצ׳אט ואוסיף חבילה.</p>')+
@@ -1161,6 +1275,9 @@ function renderHome(){
   if(lb) lb.addEventListener('click', function(){ view={name:'lab'}; render(); });
   const ob = app.querySelector('#outBtn');
   if(ob) ob.addEventListener('click', signOut);
+  const go = app.querySelector('#goBtn');
+  if(go) go.addEventListener('click', startMixed);
+  app.querySelector('#examBtn').addEventListener('click', openExamSheet);
 }
 
 function renderDeck(){
@@ -1261,7 +1378,11 @@ function renderQuiz(){
     } else {
       fb = '<div class="feedback bad"><span class="fb-txt">התשובה: <b'+(correctOpt&&correctOpt.ltr?' class="ltr"':'')+'>'+
         esc(name)+'</b>'+(q.why?' · '+esc(q.why):'')+'</span>'+
+        (CFG.explainUrl ? '<button class="why-btn" id="whyBtn">'+
+          (q.whyBusy?'…':'למה?')+'</button>' : '')+
         '<button class="next" id="nextBtn">הבא</button></div>';
+      const cached = q.whyText || whyFor(q.key);
+      if(cached) fb += '<div class="why">'+esc(cached)+'</div>';
     }
   }
 
@@ -1274,7 +1395,7 @@ function renderQuiz(){
   '<div class="quiz">'+
     '<div class="prompt-label">'+esc(q.label)+'</div>'+
     '<div class="stage">'+promptHTML(q.prompt)+'</div>'+
-    opts + fb +
+    opts + '<div class="fb-wrap">' + fb + '</div>' +
   '</div>';
 
   app.querySelector('#homeBtn').addEventListener('click', function(){ view={name:'deck',deck:quiz.deck.id}; quiz=null; render(); });
@@ -1283,6 +1404,24 @@ function renderQuiz(){
   });
   const nb=app.querySelector('#nextBtn');
   if(nb) nb.addEventListener('click', next);
+
+  const wb=app.querySelector('#whyBtn');
+  if(wb) wb.addEventListener('click', function(){
+    if(q.whyBusy || q.whyText || whyFor(q.key)) return;
+    q.whyBusy = true; render();
+    const chosen = q.options.filter(function(o){ return o.id===q.answered; })[0];
+    callFn(CFG.explainUrl, {
+      question: q.prompt.main || (q.prompt.mol ? q.label + ' — ' + (correctOpt.sub||'') : q.label),
+      answer:   (correctOpt.main||'') + (correctOpt.sub ? ' — '+correctOpt.sub : ''),
+      chosen:   chosen ? chosen.main : '',
+      deck:     quiz.deck.title
+    }).then(function(res){
+      q.whyBusy = false;
+      if(res.ok && res.body.text){ q.whyText = res.body.text; whySave(q.key, res.body.text); }
+      else q.whyText = res.body.error || 'לא הצלחתי להסביר.';
+      render();
+    });
+  });
 }
 
 function renderResults(){
@@ -1314,14 +1453,20 @@ function renderResults(){
                  : '<p class="note">אפס טעויות. אין מה לחזור עליו.</p>')+
     '<div class="btn-row">'+
       '<button class="btn primary" id="againBtn">סבב נוסף</button>'+
-      '<button class="btn" id="deckBtn">חבילה</button>'+
+      '<button class="btn" id="deckBtn">'+(quiz.deck.id==='all'?'בית':'חבילה')+'</button>'+
     '</div>'+
   '</div>';
 
   const deckId = quiz.deck.id, mode = quiz.mode;
   app.querySelector('#homeBtn').addEventListener('click', function(){ quiz=null; view={name:'home'}; render(); });
-  app.querySelector('#deckBtn').addEventListener('click', function(){ quiz=null; view={name:'deck',deck:deckId}; render(); });
-  app.querySelector('#againBtn').addEventListener('click', function(){ startQuiz(deckId, mode); });
+  app.querySelector('#deckBtn').addEventListener('click', function(){
+    quiz=null;
+    view = deckId==='all' ? {name:'home'} : {name:'deck', deck:deckId};
+    render();
+  });
+  app.querySelector('#againBtn').addEventListener('click', function(){
+    if(deckId==='all') startMixed(); else startQuiz(deckId, mode);
+  });
 }
 
 function renderMap(){
@@ -1637,7 +1782,7 @@ function renderLock(){
   app.innerHTML =
   '<div class="lock">'+
     '<header>'+
-      '<div class="eyebrow">ביוכימיה · הכנה למבחן</div>'+
+      '<div class="eyebrow">חזרה מרווחת · הכנה למבחן</div>'+
       '<h1>שינון</h1>'+
       '<p class="lede">התחבר כדי להיכנס.</p>'+
     '</header>'+
