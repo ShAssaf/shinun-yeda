@@ -77,7 +77,8 @@ h1{
 
 /* ---------- home ---------- */
 .home-wrap{flex:1;display:flex;flex-direction:column;justify-content:center;gap:24px;padding:28px 0}
-.stats-row{display:flex;gap:10px}
+.stats-row{display:flex;gap:10px;width:100%;text-align:right}
+.stats-row:hover .stat{border-color:var(--line-2)}
 .stat{flex:1;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:11px 13px}
 .stat b{
   display:block;font-family:"IBM Plex Sans",sans-serif;font-size:22px;font-weight:600;
@@ -95,6 +96,13 @@ h1{
 .deck-card:hover{border-color:var(--accent)}
 .deck-card:active{transform:scale(.99)}
 .deck-card .dot{width:10px;height:10px;border-radius:99px;flex:none}
+.deck-card.more{border-style:dashed;background:transparent;box-shadow:none}
+.deck-card.more:hover{background:var(--surface)}
+.deck-card.more .txt strong{font-family:"Heebo",sans-serif;font-size:15px;font-weight:500}
+.deck-card .more-dot{
+  width:auto;height:auto;border-radius:0;color:var(--accent);display:grid;place-items:center;
+}
+.deck-card.more .prog b{color:var(--line-2)}
 .deck-card .txt{flex:1;min-width:0}
 .deck-card .txt strong{display:block;font-family:"Frank Ruhl Libre",Georgia,serif;font-size:19px;font-weight:700}
 .deck-card .txt span{display:block;font-size:12.5px;color:var(--ink-2);margin-top:2px}
@@ -349,7 +357,46 @@ h1{
 }
 .alt-clear:hover{color:var(--bad);border-color:var(--bad)}
 
-/* ---------- חנות החבילות ---------- */
+/* ---------- סטטיסטיקה ---------- */
+.stats-wrap{flex:1;display:flex;flex-direction:column;gap:16px;padding:4px 0 12px}
+.hero{display:flex;gap:10px}
+.hero .tile{
+  flex:1;background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:12px 13px;
+}
+.hero .tile b{
+  display:block;font-family:"IBM Plex Sans",sans-serif;font-size:26px;font-weight:600;
+  font-variant-numeric:tabular-nums;line-height:1.15;
+}
+.hero .tile span{display:block;font-size:11.5px;color:var(--ink-2);margin-top:3px;line-height:1.4}
+.panel-chart{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 12px 10px}
+.panel-chart h3{
+  font-family:"IBM Plex Sans",sans-serif;font-size:11px;font-weight:600;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-2);margin:0 0 2px;padding:0 2px;
+}
+.panel-chart .cap{font-size:12px;color:var(--ink-2);margin:0 0 10px;padding:0 2px;line-height:1.5}
+.panel-chart svg{width:100%;height:auto;display:block;overflow:visible}
+.bar-hit{fill:transparent;cursor:default}
+.bar-hit:hover + .bar-mark, .bar-hit:focus + .bar-mark{fill:var(--ink)}
+.tip{
+  position:fixed;pointer-events:none;z-index:60;background:var(--ink);color:var(--bg);
+  border-radius:8px;padding:5px 9px;font-size:12px;white-space:nowrap;
+  font-variant-numeric:tabular-nums;opacity:0;transition:opacity .12s;
+}
+.tip.on{opacity:1}
+.dtable{display:flex;flex-direction:column;gap:7px}
+.drow{
+  display:flex;align-items:center;gap:10px;background:var(--surface);
+  border:1px solid var(--line);border-radius:12px;padding:10px 12px;
+}
+.drow .dot{width:9px;height:9px;border-radius:99px;flex:none}
+.drow .nm{flex:1;min-width:0;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.drow .num{
+  font-family:"IBM Plex Sans",sans-serif;font-size:12.5px;color:var(--ink-2);
+  font-variant-numeric:tabular-nums;flex:none;direction:ltr;
+}
+.drow .num b{color:var(--ink);font-weight:600}
+
+/* ---------- מאגר הנושאים ---------- */
 .store-wrap{flex:1;display:flex;flex-direction:column;gap:14px;padding:4px 0 10px}
 .store-sec h3{
   font-family:"IBM Plex Sans",sans-serif;font-size:11px;font-weight:600;
@@ -371,6 +418,18 @@ h1{
 .scard .act.on{color:var(--accent);border-color:var(--accent)}
 .scard .act.danger:hover{color:var(--bad);border-color:var(--bad)}
 .scard .act:disabled{opacity:.5;cursor:default}
+.scard.hl{border-color:var(--accent)}
+.panel.share{padding:13px 14px;display:flex;flex-direction:column;gap:10px}
+.share-row{display:flex;align-items:center;gap:12px}
+.share-row > div{flex:1;min-width:0}
+.share-row strong{display:block;font-size:14.5px;font-weight:600}
+.share-row span{display:block;font-size:12px;color:var(--ink-2);margin-top:2px;line-height:1.5}
+.share-row .act{
+  flex:none;border:1px solid var(--line-2);border-radius:99px;padding:6px 13px;
+  font-size:12.5px;color:var(--ink-2);white-space:nowrap;
+}
+.share-row .act.on{color:var(--accent);border-color:var(--accent)}
+.share-row .act:disabled{opacity:.5;cursor:default}
 .vis{
   flex:none;font-size:10.5px;border-radius:99px;padding:1px 8px;
   border:1px solid var(--line-2);color:var(--ink-2);font-weight:400;
@@ -1059,6 +1118,7 @@ function topicQuestion(cards, key, mode){
    =========================================================== */
 const ROWS_KEY = 'shinun-rows';
 let ROWS = jread(ROWS_KEY, null);        /* null = עוד לא נמשך מהשרת */
+let pendingShare = null;                 /* נושא שהגיע בקישור לפני התחברות */
 
 function rest(path, init){
   return fetch(CFG.supabaseUrl + '/rest/v1/' + path,
@@ -1117,12 +1177,12 @@ function setVisibility(deckId, vis){
   });
 }
 
-/* זריעה חד־פעמית מהתוכן המוטמע. רצה רק כשאין לי מינויים ואין
-   שום חבילה ציבורית — כלומר המשתמש הראשון בלבד. */
-function seedIfEmpty(){
+/* ייבוא ערכת הפתיחה — פעולה מפורשת בלבד. זריעה אוטומטית הייתה יוצרת
+   לכל משתמש חדש עותק של תוכן שלא ביקש, וזה נראה כאילו הוא רואה חבילות
+   של מישהו אחר. */
+function importStarter(){
   if(!canSync() || !AUTH.uid) return Promise.resolve(false);
-  return Promise.all([fetchSubs(), fetchMine()]).then(function(res){
-    if(res[0].length || res[1].length) return false;
+  return Promise.resolve().then(function(){
     const rows = localRows().map(function(r){
       const count = r.kind==='iso'
         ? (r.data.iso.length + r.data.isoTerms.length)
@@ -1155,13 +1215,17 @@ function seedIfEmpty(){
 /* טעינת הספרייה: מהשרת אם אפשר, אחרת מהמראה המקומי,
    ואם גם הוא ריק — מהתוכן המוטמע, כדי שהאפליקציה לא תהיה ריקה. */
 function loadLibrary(){
-  return seedIfEmpty().then(fetchLibrary).then(function(rows){
-    if(rows && rows.length){ ROWS = rows; jwrite(ROWS_KEY, ROWS); }
+  return fetchLibrary().then(function(rows){
+    /* מערך — גם ריק — הוא תשובה מחייבת מהשרת. null פירושו שלא הצלחנו
+       לשאול, ואז נשארים עם המראה המקומי. */
+    if(rows){ ROWS = rows; jwrite(ROWS_KEY, ROWS); }
     applyRows();
   }).catch(function(){ applyRows(); });
 }
 function applyRows(){
-  DECKS = buildDecks(ROWS && ROWS.length ? ROWS : localRows());
+  /* ROWS ריק אחרי תשובת שרת = הספרייה באמת ריקה, וזה מה שצריך להציג.
+     ROWS שהוא null = השרת מעולם לא ענה, ואז התוכן המוטמע עדיף על מסך ריק. */
+  DECKS = buildDecks(ROWS || localRows());
   render();
 }
 
@@ -1424,19 +1488,27 @@ function renderHome(){
       '<h1>שינון</h1>'+
       '<p class="lede">חזרה מרווחת. כל כרטיס חוזר בדיוק לפני שהיית שוכח אותו.</p>'+
     '</header>'+
-    '<div class="stats-row">'+
+    '<button class="stats-row" id="statsBtn" aria-label="סטטיסטיקה">'+
       '<div class="stat"><b dir="ltr">'+totalDue+'</b><span>לחזרה עכשיו</span></div>'+
       '<div class="stat"><b dir="ltr">'+totalMastered+'<span style="font-size:14px;color:var(--ink-2)">/'+totalItems+'</span></b><span>נשלטים</span></div>'+
       '<div class="stat"><b>'+(store.rounds||0)+'</b><span>סבבים</span></div>'+
+    '</button>'+
+    (!DECKS.length
+      ? '<p class="note">אין עדיין נושאים בספרייה שלך. פתח את מאגר הנושאים כדי להוסיף.</p>'
+      : totalDue
+        ? '<button class="btn primary go" id="goBtn">חזרה עכשיו · '+
+            Math.min(totalDue, ROUND)+' כרטיסים</button>'
+        : '<p class="note">אין כרטיסים לחזרה כרגע. אפשר להיכנס לנושא ולתרגל בכל זאת.</p>')+
+    '<div class="deck-list">'+cards+
+      (canSync()
+        ? '<button class="deck-card more" id="storeBtn">'+
+            '<span class="dot more-dot">'+icon('store')+'</span>'+
+            '<span class="txt"><strong>מאגר הנושאים</strong>'+
+              '<span>נושאים שפורסמו · הוסף לספרייה שלך</span></span>'+
+            '<span class="prog"><b>'+icon('arrow')+'</b></span>'+
+          '</button>'
+        : '')+
     '</div>'+
-    (totalDue
-      ? '<button class="btn primary go" id="goBtn">חזרה עכשיו · '+
-          Math.min(totalDue, ROUND)+' כרטיסים</button>'
-      : '<p class="note">אין כרטיסים לחזרה כרגע. אפשר להיכנס לחבילה ולתרגל בכל זאת.</p>')+
-    '<div class="deck-list">'+cards+'</div>'+
-    (canSync()
-      ? '<button class="lab-entry" id="storeBtn">'+icon('store')+' חנות החבילות</button>'
-      : '')+
     '<button class="exam" id="examBtn">'+examLabel()+'</button>'+
     (CFG.addQuestionUrl && AUTH && AUTH.editor
       ? '<button class="add-btn" id="addBtn">'+icon('plus')+' הוסף שאלה או תקן טעות</button>'
@@ -1462,11 +1534,21 @@ function renderHome(){
   if(go) go.addEventListener('click', startMixed);
   app.querySelector('#examBtn').addEventListener('click', openExamSheet);
   const sb = app.querySelector('#storeBtn');
-  if(sb) sb.addEventListener('click', openStore);
+  if(sb) sb.addEventListener('click', function(){ openStore(); });
+  app.querySelector('#statsBtn').addEventListener('click', function(){
+    view={name:'stats'}; loadStats();
+  });
+}
+
+/* חבילה שלי = יש לה שורה במסד ואני הבעלים. חבילה מקומית (לפני זריעה)
+   אינה ניתנת לשיתוף, כי אין לה קיום בשרת. */
+function mineDeck(d){
+  return !!(d.row && d.row.owner_id && AUTH && d.row.owner_id === AUTH.uid);
 }
 
 function renderDeck(){
   const d = deckById(view.deck);
+  const pub = !!(d.row && d.row.visibility === 'public');
   const m = masteredCount(d.items, d.keyFn);
   const due = dueCount(d.items, d.keyFn);
   const modes = d.modes.map(function(mo){
@@ -1496,6 +1578,18 @@ function renderDeck(){
       '<button class="link-btn" id="browseBtn">'+icon('book')+' עיון — כל הכרטיסים גלויים</button>'+
       (d.map ? '<button class="link-btn" id="mapBtn">מפת האיזומרים</button>' : '')+
     '</div>'+
+    (mineDeck(d)
+      ? '<div class="panel share">'+
+          '<div class="share-row">'+
+            '<div><strong>'+(pub?'נושא ציבורי':'נושא פרטי')+'</strong>'+
+            '<span>'+(pub
+              ? 'כל מי שמחובר יכול למצוא אותו במאגר ולהוסיף לעצמו.'
+              : 'רק אתה רואה אותו.')+'</span></div>'+
+            '<button class="act'+(pub?' on':'')+'" id="pubBtn">'+(pub?'הפוך לפרטי':'פרסם')+'</button>'+
+          '</div>'+
+          (pub ? '<button class="link-btn" id="linkBtn">העתק קישור לנושא</button>' : '')+
+        '</div>'
+      : '')+
   '</div>';
 
   app.querySelector('#homeBtn').addEventListener('click', function(){ view={name:'home'}; render(); });
@@ -1503,6 +1597,27 @@ function renderDeck(){
   if(mb) mb.addEventListener('click', function(){ view={name:'map', back:d.id}; render(); });
   app.querySelector('#browseBtn').addEventListener('click', function(){
     view={name:'browse', deck:d.id, q:'', hide:false}; render();
+  });
+
+  const pb = app.querySelector('#pubBtn');
+  if(pb) pb.addEventListener('click', function(){
+    pb.disabled = true;
+    setVisibility(d.row.id, pub ? 'private' : 'public').then(function(r){
+      if(!r.ok) throw new Error('failed');
+      d.row.visibility = pub ? 'private' : 'public';
+      jwrite(ROWS_KEY, ROWS);
+      render();
+    }).catch(function(){ pb.disabled = false; });
+  });
+
+  const lb2 = app.querySelector('#linkBtn');
+  if(lb2) lb2.addEventListener('click', function(){
+    const url = location.origin + location.pathname + '?deck=' + d.row.id;
+    const done = function(){ lb2.textContent = 'הקישור הועתק'; setTimeout(function(){
+      lb2.textContent = 'העתק קישור לנושא'; }, 1800); };
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(url).then(done).catch(function(){ prompt('הקישור:', url); });
+    } else prompt('הקישור:', url);
   });
   Array.prototype.forEach.call(app.querySelectorAll('.mode'), function(btn){
     btn.addEventListener('click', function(){ startQuiz(d.id, btn.dataset.mode); });
@@ -1767,7 +1882,12 @@ function loadIdentity(){
       if(u && u.email){
         AUTH.email = u.email; AUTH.uid = u.id; authWrite(AUTH); render();
         verifyAccess(true).then(function(){
-          if(AUTH){ pullCards(); flushQueue(); loadLibrary(); }
+          if(AUTH){
+            pullCards(); flushQueue();
+            loadLibrary().then(function(){
+              if(pendingShare){ const id = pendingShare; pendingShare = null; openStore(id); }
+            });
+          }
         });
         return;
       }
@@ -2096,11 +2216,11 @@ function renderBrowse(){
 }
 
 /* ===========================================================
-   חנות החבילות — מה שלי, ומה שאחרים פרסמו. מינוי הוא חי:
+   מאגר הנושאים — מה שלי, ומה שאחרים פרסמו. מינוי הוא חי:
    הבעלים מעדכן, וכל מי שרשום רואה מיד את הגרסה החדשה.
    =========================================================== */
-function openStore(){
-  view = {name:'store', loading:true, mine:[], others:[], subs:[]};
+function openStore(highlight){
+  view = {name:'store', loading:true, mine:[], others:[], subs:[], highlight:highlight||null};
   render();
   Promise.all([fetchMine(), fetchStore(), fetchSubs()]).then(function(r){
     const mineIds = r[0].map(function(d){ return d.id; });
@@ -2108,6 +2228,11 @@ function openStore(){
     view.others = r[1].filter(function(d){ return mineIds.indexOf(d.id) < 0; });
     view.subs   = r[2];
     view.loading = false;
+    /* נושא שהגיע מקישור מוצג ראשון, גם אם עוד לא נרשמתי אליו */
+    if(view.highlight){
+      const idx = view.others.map(function(x){ return x.id; }).indexOf(view.highlight);
+      if(idx > 0) view.others.unshift(view.others.splice(idx,1)[0]);
+    }
     render();
   }).catch(function(){ view.loading = false; view.err = 'לא הצלחתי לטעון.'; render(); });
 }
@@ -2119,7 +2244,7 @@ function renderStore(){
   function card(d, mine){
     const count = d.item_count || 0;
     const pub = d.visibility === 'public';
-    return '<div class="scard">'+
+    return '<div class="scard'+(view.highlight===d.id ? ' hl' : '')+'">'+
       '<div class="txt"><strong>'+esc(d.title)+
         (mine ? '<span class="vis'+(pub?' pub':'')+'">'+(pub?'ציבורית':'פרטית')+'</span>' : '')+
       '</strong>'+
@@ -2136,7 +2261,7 @@ function renderStore(){
   app.innerHTML =
   '<div class="bar">'+
     '<button class="icon-btn" id="backBtn" aria-label="חזרה">'+icon('arrow')+'</button>'+
-    '<div class="title">חנות החבילות</div>'+
+    '<div class="title">מאגר הנושאים</div>'+
   '</div>'+
   '<div class="store-wrap">'+
     (view.loading ? '<p class="note">טוען…</p>' : '')+
@@ -2148,7 +2273,14 @@ function renderStore(){
         ? others.map(function(d){ return card(d, false); }).join('')
         : (view.loading ? '' : '<p class="note">אין כרגע חבילות ציבוריות.</p>'))+
     '</div>'+
-    '<p class="note">פרסום הופך חבילה לקריאה לכל מי שמחובר. עריכה נשארת אצל הבעלים, '+
+    (!view.loading && !mine.length
+      ? '<div class="panel share"><div class="share-row">'+
+          '<div><strong>ערכת פתיחה</strong><span>קבוצות פונקציונליות, יסודות ואיזומרים. '+
+            'נוצרת כנושאים פרטיים שלך, ואפשר לפרסם אותם אחר כך.</span></div>'+
+          '<button class="act" id="seedBtn">ייבא</button>'+
+        '</div></div>'
+      : '')+
+    '<p class="note">פרסום הופך נושא לקריא לכל מי שמחובר. עריכה נשארת אצל הבעלים, '+
       'ומי שרשום רואה תמיד את הגרסה העדכנית.</p>'+
   '</div>';
 
@@ -2163,12 +2295,171 @@ function renderStore(){
         .catch(function(){ b.disabled = false; });
     });
   });
+  const seedB = app.querySelector('#seedBtn');
+  if(seedB) seedB.addEventListener('click', function(){
+    seedB.disabled = true; seedB.textContent = 'מייבא…';
+    importStarter().then(function(ok){
+      if(!ok){ seedB.disabled = false; seedB.textContent = 'ייבא'; return; }
+      return loadLibrary().then(function(){ openStore(); });
+    });
+  });
+
   Array.prototype.forEach.call(app.querySelectorAll('[data-pub]'), function(b){
     b.addEventListener('click', function(){
       b.disabled = true;
       setVisibility(b.dataset.pub, b.dataset.to).then(function(){ openStore(); })
         .catch(function(){ b.disabled = false; });
     });
+  });
+}
+
+/* ===========================================================
+   סטטיסטיקה. תחזית העומס נגזרת מ-CARDS המקומי ולכן זמינה גם אופליין;
+   שיעור ההצלחה דורש את יומן החזרות מהשרת.
+   =========================================================== */
+const DAY_NAMES = ['א','ב','ג','ד','ה','ו','ש'];
+
+function forecast(days){
+  const out = [];
+  const start = new Date(); start.setHours(0,0,0,0);
+  for(let i=0;i<days;i++){
+    const from = start.getTime() + i*DAY, to = from + DAY;
+    let n = 0;
+    Object.keys(CARDS).forEach(function(k){
+      const due = CARDS[k].due;
+      /* כל מה שבאיחור נופל להיום, כי זה מה שבאמת מחכה לך */
+      if(i===0 ? due < to : (due >= from && due < to)) n++;
+    });
+    out.push({t:from, n:n, day:DAY_NAMES[new Date(from).getDay()]});
+  }
+  return out;
+}
+
+/* עמודות דקות, קצה נתונים מעוגל, רווח בין עמודות, רשת רצסיבית.
+   סדרה אחת — אין מקרא, הכותרת היא שמה. */
+function barChart(rows, opts){
+  const W = 320, H = 132, padB = 20, padT = 14;
+  const max = Math.max(1, rows.reduce(function(a,r){ return Math.max(a, r.n); }, 0));
+  const gap = 2, bw = (W - gap*(rows.length-1)) / rows.length;
+  const y = function(v){ return padT + (H - padT - padB) * (1 - v/max); };
+
+  let grid = '', bars = '', labels = '';
+  [0, max/2, max].forEach(function(v){
+    const yy = y(v);
+    grid += '<line x1="0" y1="'+yy+'" x2="'+W+'" y2="'+yy+'" stroke="var(--line)" stroke-width="1"/>';
+    grid += '<text x="'+(W+4)+'" y="'+(yy+3.5)+'" font-size="9" fill="var(--ink-2)" '+
+            'font-family="IBM Plex Sans, sans-serif">'+Math.round(v)+'</text>';
+  });
+
+  rows.forEach(function(r, i){
+    const x = i*(bw+gap), h = Math.max(r.n ? 3 : 0, (H - padT - padB) * r.n/max);
+    const top = H - padB - h;
+    const fill = i===0 ? 'var(--c-o)' : 'var(--accent)';
+    if(h > 0){
+      bars += '<rect class="bar-mark" x="'+x+'" y="'+top+'" width="'+bw+'" height="'+h+'" '+
+              'rx="'+Math.min(4, bw/2)+'" fill="'+fill+'"/>';
+    }
+    bars += '<rect class="bar-hit" x="'+x+'" y="'+padT+'" width="'+bw+'" height="'+(H-padT-padB)+'" '+
+            'data-tip="'+esc((i===0?'היום':r.day)+' · '+r.n+' כרטיסים')+'"><title>'+
+            esc((i===0?'היום':'בעוד '+i+' ימים')+': '+r.n+' כרטיסים')+'</title></rect>';
+    /* תווית על כל עמודה שלישית בלבד — לא מספר על כל נקודה */
+    if(i===0 || i % 3 === 0){
+      labels += '<text x="'+(x+bw/2)+'" y="'+(H-6)+'" font-size="9" text-anchor="middle" '+
+                'fill="var(--ink-2)" font-family="IBM Plex Sans, sans-serif">'+
+                (i===0 ? 'היום' : r.day)+'</text>';
+    }
+  });
+
+  return '<svg viewBox="-2 0 '+(W+26)+' '+H+'" role="img" dir="ltr" '+
+    'aria-label="'+esc(opts.alt)+'">'+grid+bars+labels+'</svg>';
+}
+
+function loadStats(){
+  view.stats = {loading:true};
+  render();
+  const since = new Date(Date.now() - 30*DAY).toISOString();
+  const q = canSync()
+    ? rest('review_log?select=rating,reviewed_at&reviewed_at=gte.' + since +
+           '&order=reviewed_at.desc&limit=3000')
+        .then(function(r){ return r.ok ? r.json() : []; }).catch(function(){ return []; })
+    : Promise.resolve([]);
+  q.then(function(logs){
+    const week = Date.now() - 7*DAY;
+    view.stats = {
+      loading:false,
+      total: logs.length,
+      correct: logs.filter(function(l){ return l.rating > 1; }).length,
+      week: logs.filter(function(l){ return Date.parse(l.reviewed_at) >= week; }).length,
+    };
+    render();
+  });
+}
+
+function renderStats(){
+  const st = view.stats || {loading:true};
+  const items = DECKS.reduce(function(a,d){ return a.concat(d.items.map(function(it){
+    return {deck:d, key:d.keyFn(it)}; })); }, []);
+  const seen = items.filter(function(x){ return cardState(x.key); }).length;
+  const mastered = items.filter(function(x){ const c=cardState(x.key); return c && c.s>=21; }).length;
+  const rows = forecast(14);
+  const acc = st.total ? Math.round(st.correct / st.total * 100) : null;
+
+  app.innerHTML =
+  '<div class="bar">'+
+    '<button class="icon-btn" id="backBtn" aria-label="חזרה">'+icon('arrow')+'</button>'+
+    '<div class="title">סטטיסטיקה</div>'+
+  '</div>'+
+  '<div class="stats-wrap">'+
+    '<div class="hero">'+
+      '<div class="tile"><b dir="ltr">'+(acc===null?'—':acc+'%')+'</b>'+
+        '<span>שיעור הצלחה · 30 יום</span></div>'+
+      '<div class="tile"><b dir="ltr">'+(st.loading?'…':st.week)+'</b>'+
+        '<span>חזרות בשבוע האחרון</span></div>'+
+      '<div class="tile"><b dir="ltr">'+mastered+'<span style="font-size:14px;color:var(--ink-2)">/'+items.length+'</span></b>'+
+        '<span>נשלטים</span></div>'+
+    '</div>'+
+
+    '<div class="panel-chart">'+
+      '<h3>תחזית עומס</h3>'+
+      '<p class="cap">כמה כרטיסים ממתינים לחזרה בכל יום. העמודה הראשונה כוללת גם מה שכבר באיחור.</p>'+
+      barChart(rows, {alt:'תחזית חזרות לארבעה־עשר הימים הקרובים'})+
+    '</div>'+
+
+    '<div>'+
+      '<h3 style="font-family:\'IBM Plex Sans\',sans-serif;font-size:11px;font-weight:600;'+
+        'letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2);margin:0 0 8px">לפי נושא</h3>'+
+      '<div class="dtable">'+DECKS.map(function(d){
+        const dm = masteredCount(d.items, d.keyFn), dd = dueCount(d.items, d.keyFn);
+        return '<div class="drow"><span class="dot" style="background:'+d.color+'"></span>'+
+          '<span class="nm">'+esc(d.title)+'</span>'+
+          '<span class="num"><b>'+dm+'</b>/'+d.items.length+' נשלטים · <b>'+dd+'</b> לחזרה</span></div>';
+      }).join('')+'</div>'+
+    '</div>'+
+
+    '<p class="note">'+seen+' מתוך '+items.length+' כרטיסים כבר נראו. '+
+      (canSync() ? '' : 'שיעור ההצלחה דורש חיבור לרשת.')+'</p>'+
+  '</div>';
+
+  app.querySelector('#backBtn').addEventListener('click', function(){ view={name:'home'}; render(); });
+
+  /* שכבת ריחוף — נגיעה או מעבר עכבר על עמודה */
+  const tip = document.createElement('div');
+  tip.className = 'tip';
+  document.body.appendChild(tip);
+  const show = function(e){
+    const t = e.currentTarget.dataset.tip;
+    tip.textContent = t; tip.classList.add('on');
+    const r = e.currentTarget.getBoundingClientRect();
+    tip.style.left = Math.max(8, Math.min(window.innerWidth - tip.offsetWidth - 8,
+                                          r.left + r.width/2 - tip.offsetWidth/2)) + 'px';
+    tip.style.top = (r.top - tip.offsetHeight - 6) + 'px';
+  };
+  const hide = function(){ tip.classList.remove('on'); };
+  Array.prototype.forEach.call(app.querySelectorAll('.bar-hit'), function(b){
+    b.addEventListener('mouseenter', show);
+    b.addEventListener('mouseleave', hide);
+    b.addEventListener('touchstart', show, {passive:true});
+    b.addEventListener('touchend', hide);
   });
 }
 
@@ -2181,6 +2472,7 @@ function render(){
   else if(view.name==='lab') renderLab();
   else if(view.name==='browse') renderBrowse();
   else if(view.name==='store') renderStore();
+  else if(view.name==='stats') renderStats();
   else renderHome();
   window.scrollTo(0,0);
 }
@@ -2196,4 +2488,13 @@ document.addEventListener('keydown', function(e){
 render();
 if(authEnabled) loadIdentity();
 if(canSync()){ verifyAccess(false); pullCards(); flushQueue(); loadLibrary(); }
+
+/* קישור לנושא — פותח את המאגר עם הנושא בראש הרשימה */
+(function(){
+  const shared = new URLSearchParams(location.search).get('deck');
+  if(!shared) return;
+  history.replaceState(null, '', location.pathname);
+  const open = function(){ if(canSync()) openStore(shared); };
+  if(AUTH) setTimeout(open, 400); else pendingShare = shared;
+})();
 </script>

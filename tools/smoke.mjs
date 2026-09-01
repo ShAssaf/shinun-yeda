@@ -226,6 +226,51 @@ try {
   fail.push('מסך החנות נפל: ' + e.message);
 }
 
+/* 5c — ספרייה ריקה מהשרת נשארת ריקה; רק כישלון משיכה נופל לתוכן המוטמע */
+{
+  const behaviour = win.eval(`(function(){
+    const before = DECKS.length;
+    ROWS = []; applyRows();
+    const emptyAnswer = DECKS.length;
+    ROWS = null; applyRows();
+    const noAnswer = DECKS.length;
+    return JSON.stringify({before:before, emptyAnswer:emptyAnswer, noAnswer:noAnswer});
+  })()`);
+  const b = JSON.parse(behaviour);
+  check(b.emptyAnswer === 0, `ספרייה ריקה מהשרת הציגה ${b.emptyAnswer} נושאים במקום 0`);
+  check(b.noAnswer === b.before, 'כישלון משיכה לא נפל חזרה לתוכן המוטמע');
+}
+
+/* 5d — מסך הסטטיסטיקה: תחזית, כרטיסי מידע ופירוט לפי נושא */
+try {
+  win.eval(`(function(){
+    const now = Date.now(), D = 86400000;
+    CARDS = {};
+    DECKS.forEach(function(d, di){
+      d.items.forEach(function(it, i){
+        CARDS[d.keyFn(it)] = {s:1+((i*7)%40), d:5,
+          due: now + (((i*3+di*2)%15) - 2)*D, last: now-D, reps:2, lapses:0};
+      });
+    });
+    quiz = null;
+    view = {name:'stats', stats:{loading:false, total:180, correct:149, week:63}};
+    render();
+  })()`);
+  const bars = document.querySelectorAll('.bar-mark').length;
+  const hits = document.querySelectorAll('.bar-hit').length;
+  check(hits === 14, `התחזית הציגה ${hits} ימים במקום 14`);
+  check(bars > 0 && bars <= 14, `מספר עמודות לא סביר: ${bars}`);
+  check(document.querySelectorAll('.drow').length === DECKS.length, 'הפירוט לפי נושא לא תואם למספר הנושאים');
+  check(document.querySelectorAll('.hero .tile').length === 3, 'חסרים כרטיסי מידע');
+  /* כל עמודה נגישה גם בלי ריחוף */
+  check(Array.from(document.querySelectorAll('.bar-hit')).every((h) => h.querySelector('title')),
+    'לעמודה חסר תיאור נגיש');
+  const svg = document.querySelector('.panel-chart svg');
+  check(svg?.getAttribute('aria-label'), 'לגרף אין aria-label');
+} catch (e) {
+  fail.push('מסך הסטטיסטיקה נפל: ' + e.message);
+}
+
 /* 6 — בלי מפגש שמור, מסך הנעילה מופיע ושום דבר אחר לא */
 {
   const locked = new JSDOM(html, {
