@@ -856,16 +856,18 @@ function reviewCard(st, g, now){
 /* ===========================================================
    התמדה
    =========================================================== */
-/* store מחזיק רק שיאים ומונה סבבים. היסטוריית הזיכרון עצמה
-   יושבת ב-CARDS ומסונכרנת ל-Supabase. */
+/* הגדרות המשתמש — תאריך מבחן ומונה סבבים. מראה מקומי לאופליין,
+   מקור אמת ב-user_settings. תאריך המבחן חייב להיות בשרת כי הוא
+   משפיע על התזמון עצמו. */
 const KEY='bio-quiz-v2';
 function loadState(){
-  try{ const r=localStorage.getItem(KEY); return r?JSON.parse(r):{best:{},rounds:0}; }
-  catch(e){ return {best:{},rounds:0}; }
+  try{ const r=localStorage.getItem(KEY); return r?JSON.parse(r):{rounds:0, examDate:null}; }
+  catch(e){ return {rounds:0, examDate:null}; }
 }
 function saveState(s){ try{ localStorage.setItem(KEY,JSON.stringify(s)); }catch(e){} }
 let store = loadState();
-if(!store.best || typeof store.best!=='object') store.best={};
+if(typeof store.rounds !== 'number') store.rounds = 0;
+delete store.best;                       /* שדה מת מגרסאות קודמות */
 
 /* ===========================================================
    מצב הכרטיסים — מראה מקומי ב-localStorage, מקור אמת ב-Supabase.
@@ -952,6 +954,40 @@ const EXPLAIN_KEY = 'shinun-why';
 let WHY = jread(EXPLAIN_KEY, {});
 function whyFor(key){ return WHY[key] || null; }
 function whySave(key, text){ WHY[key] = text; jwrite(EXPLAIN_KEY, WHY); }
+
+/* ---------- הגדרות מול השרת ---------- */
+function pullSettings(){
+  if(!canSync() || !AUTH.uid) return Promise.resolve(false);
+  return readJson('user_settings?select=exam_date,rounds&user_id=eq.' + AUTH.uid)
+    .then(function(res){
+      if(!res.ok || !res.data.length) return false;
+      const row = res.data[0];
+      store.examDate = row.exam_date || null;
+      store.rounds   = row.rounds || 0;
+      saveState(store);
+      render();
+      return true;
+    });
+}
+
+let pushingSettings = null;
+function pushSettings(){
+  if(!canSync() || !AUTH.uid) return Promise.resolve(false);
+  /* איחוד כתיבות: שינוי מהיר של תאריך לא שולח שלוש בקשות */
+  if(pushingSettings) return pushingSettings;
+  pushingSettings = rest('user_settings?on_conflict=user_id', {
+    method:'POST',
+    headers: Object.assign(restHeaders(), {Prefer:'resolution=merge-duplicates,return=minimal'}),
+    body: JSON.stringify({
+      user_id:    AUTH.uid,
+      exam_date:  store.examDate || null,
+      rounds:     store.rounds || 0,
+      updated_at: new Date().toISOString()
+    })
+  }).then(function(r){ pushingSettings = null; return r.ok; })
+    .catch(function(){ pushingSettings = null; return false; });
+  return pushingSettings;
+}
 
 /* ===========================================================
    מתזמן — מרכיב סבב מכרטיסים שהגיע זמנם, ואז חדשים,
@@ -1682,10 +1718,9 @@ function answer(optId){
 function next(){
   if(quiz.i < quiz.qs.length-1){ quiz.i++; }
   else{
-    const pct = Math.round(quiz.correct/quiz.qs.length*100);
-    store.best[quiz.deck.id] = Math.max(store.best[quiz.deck.id]||0, pct);
     store.rounds = (store.rounds||0)+1;
     saveState(store);
+    pushSettings();
     quiz.done = true;
   }
   render();
@@ -1731,11 +1766,11 @@ function openExamSheet(){
   bg.querySelector('#exClose').addEventListener('click', close);
   bg.querySelector('#exSave').addEventListener('click', function(){
     const v = bg.querySelector('#exDate').value;
-    store.examDate = v || null; saveState(store); close(); render();
+    store.examDate = v || null; saveState(store); pushSettings(); close(); render();
   });
   const clr = bg.querySelector('#exClear');
   if(clr) clr.addEventListener('click', function(){
-    store.examDate = null; saveState(store); close(); render();
+    store.examDate = null; saveState(store); pushSettings(); close(); render();
   });
 }
 
@@ -3148,6 +3183,7 @@ function boot(){
       /* מכאן והלאה יש uid, ואפשר לשגר במקביל */
       return Promise.all([
         loadLibrary(),
+        pullSettings(),
         pullCards(),
         flushQueue(),
         flushErrors(),

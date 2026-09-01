@@ -689,6 +689,36 @@ try {
     'סנכרונים מקבילים לא מתאחדים');
 }
 
+/* 5p — הגדרות המשתמש נשמרות בשרת, לא רק בדפדפן */
+{
+  check(win.eval('typeof pullSettings') === 'function', 'אין משיכת הגדרות מהשרת');
+  check(win.eval('typeof pushSettings') === 'function', 'אין שמירת הגדרות בשרת');
+  check(win.eval('boot.toString()').indexOf('pullSettings()') > -1,
+    'ההגדרות לא נמשכות בעלייה');
+  check(win.eval('next.toString()').indexOf('pushSettings()') > -1,
+    'סיום סבב לא נשמר בשרת');
+  check(win.eval('openExamSheet.toString()').indexOf('pushSettings()') > -1,
+    'תאריך המבחן לא נשמר בשרת');
+  check(win.eval('typeof store.best') === 'undefined', 'שדה השיא המת עדיין קיים');
+
+  /* כתיבות מהירות מתאחדות */
+  const merged = JSON.parse(await win.eval(`(function(){
+    const realRest = rest, save = AUTH;
+    let calls = 0;
+    AUTH = Object.assign({}, AUTH || {}, {uid:'u'});
+    pushingSettings = null;
+    rest = function(){ calls++; return Promise.resolve({ok:true}); };
+    const a = pushSettings(), b = pushSettings(), c = pushSettings();
+    const shared = (a === b) && (b === c);
+    return Promise.all([a,b,c]).then(function(){
+      rest = realRest; AUTH = save;
+      return JSON.stringify({calls:calls, shared:shared});
+    });
+  })()`));
+  check(merged.shared, 'כתיבות הגדרות מקבילות לא התאחדו');
+  check(merged.calls === 1, 'נשלחו ' + merged.calls + ' בקשות הגדרות במקום אחת');
+}
+
 /* 6 — בלי מפגש שמור, מסך הנעילה מופיע ושום דבר אחר לא */
 {
   const locked = new JSDOM(html, {
