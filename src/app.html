@@ -412,6 +412,65 @@ h1{
 }
 .drow .num b{color:var(--ink);font-weight:600}
 
+/* ---------- צ'אט הוספת תוכן ---------- */
+.chat{display:flex;flex-direction:column;gap:10px;max-height:62vh}
+.chat-log{
+  flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:9px;
+  padding:2px;min-height:120px;
+}
+.bub{
+  max-width:88%;border-radius:14px;padding:9px 12px;font-size:14px;line-height:1.55;
+  white-space:pre-wrap;word-break:break-word;
+}
+.bub.me{align-self:flex-end;background:var(--accent);color:var(--on-accent);border-bottom-left-radius:5px}
+.bub.ai{align-self:flex-start;background:var(--surface-2);color:var(--ink);border-bottom-right-radius:5px}
+.bub.sys{
+  align-self:center;background:transparent;border:1px dashed var(--line-2);
+  color:var(--ink-2);font-size:12.5px;text-align:center;max-width:100%;
+}
+.bub.done{
+  align-self:center;max-width:100%;background:var(--ok-bg);border:1px solid var(--ok);
+  color:var(--ok);font-size:13px;text-align:center;
+}
+.bub .files{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+.bub .files img{width:52px;height:52px;object-fit:cover;border-radius:7px}
+.bub .files .doc{
+  font-family:"IBM Plex Sans",sans-serif;font-size:11px;border-radius:7px;
+  padding:4px 8px;background:rgba(0,0,0,.18);
+}
+.typing{display:inline-flex;gap:3px;align-items:center}
+.typing i{width:5px;height:5px;border-radius:99px;background:currentColor;opacity:.4;
+  animation:blink 1.2s infinite}
+.typing i:nth-child(2){animation-delay:.2s}
+.typing i:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,60%,100%{opacity:.25}30%{opacity:1}}
+.composer{display:flex;flex-direction:column;gap:8px}
+.tray{display:flex;flex-wrap:wrap;gap:7px}
+.tray .chip-f{
+  position:relative;border:1px solid var(--line);border-radius:9px;overflow:hidden;
+  width:58px;height:58px;display:grid;place-items:center;background:var(--surface-2);
+}
+.tray .chip-f img{width:100%;height:100%;object-fit:cover}
+.tray .chip-f span{font-family:"IBM Plex Sans",sans-serif;font-size:10px;color:var(--ink-2);padding:2px}
+.tray .chip-f button{
+  position:absolute;top:2px;inset-inline-end:2px;width:17px;height:17px;border-radius:99px;
+  background:rgba(8,14,13,.8);color:#fff;font-size:11px;display:grid;place-items:center;
+}
+.row-in{display:flex;gap:8px;align-items:flex-end}
+.row-in textarea{
+  flex:1;min-height:44px;max-height:120px;resize:none;
+  background:var(--surface);color:var(--ink);border:1px solid var(--line);
+  border-radius:12px;padding:11px 12px;font:inherit;font-size:15px;line-height:1.4;
+}
+.row-in button{
+  flex:none;width:44px;height:44px;border-radius:12px;display:grid;place-items:center;
+  border:1px solid var(--line);color:var(--ink-2);
+}
+.row-in button:hover{color:var(--accent);border-color:var(--accent)}
+.row-in button.go{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.row-in button:disabled{opacity:.5;cursor:default}
+.paste-hint{font-size:11.5px;color:var(--ink-2);text-align:center}
+
 /* ---------- מאגר הנושאים ---------- */
 .store-wrap{flex:1;display:flex;flex-direction:column;gap:14px;padding:4px 0 10px}
 .sec-note{font-size:12px;color:var(--ink-2);line-height:1.55;margin:0 0 9px}
@@ -1734,6 +1793,7 @@ function icon(kind){
   if(kind==='google') return '<svg width="17" height="17" viewBox="0 0 48 48"><path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.2-.4-4.7H24v8.9h11.8c-.5 2.7-2 5-4.4 6.6v5.5h7.1c4.2-3.8 6.6-9.5 6.6-16.3z"/><path fill="#34A853" d="M24 46c6 0 11-2 14.6-5.4l-7.1-5.5c-2 1.3-4.5 2.1-7.5 2.1-5.8 0-10.7-3.9-12.4-9.1H4.3v5.7C7.9 41.1 15.4 46 24 46z"/><path fill="#FBBC05" d="M11.6 28.1c-.4-1.3-.7-2.7-.7-4.1s.3-2.8.7-4.1v-5.7H4.3C2.8 17.1 2 20.4 2 24s.8 6.9 2.3 9.8l7.3-5.7z"/><path fill="#EA4335" d="M24 10.8c3.3 0 6.2 1.1 8.5 3.3l6.3-6.3C35 4.1 30 2 24 2 15.4 2 7.9 6.9 4.3 14.2l7.3 5.7c1.7-5.2 6.6-9.1 12.4-9.1z"/></svg>';
   if(kind==='store') return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h16l-1 10.5A1.5 1.5 0 0 1 17.5 21h-11A1.5 1.5 0 0 1 5 19.5z"/><path d="M8.5 9V6.5a3.5 3.5 0 0 1 7 0V9"/></svg>';
   if(kind==='book') return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v16H5.5A1.5 1.5 0 0 1 4 18.5z"/><path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H13v16h5.5a1.5 1.5 0 0 0 1.5-1.5z"/></svg>';
+  if(kind==='send') return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 4 3 11l7 2 2 7z"/><path d="M20 4 10 13"/></svg>';
   if(kind==='camera') return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5A1.5 1.5 0 0 1 4.5 7h2.2l1.2-2h8.2l1.2 2h2.2A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/><circle cx="12" cy="13" r="3.4"/></svg>';
   if(kind==='wrench') return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0 5 5l-8.4 8.4a2.1 2.1 0 0 1-3-3z"/><path d="M19.7 11.3 21 6l-2.5.7L17 4l-2.3 2.3"/></svg>';
   if(kind==='plus') return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
@@ -2403,103 +2463,213 @@ const EXAMPLES = [
   'ההגדרה של אנומרים לא מדויקת — תקן',
 ];
 
+/* ===========================================================
+   צ'אט הוספת תוכן. שיחה ולא פקודה אחת: אפשר לצרף PDF או תמונות,
+   לשאול, לתקן, ולאשר. הקבצים מכווצים בלקוח; PDF נשלח כמו שהוא.
+   =========================================================== */
+const CHAT_EXAMPLES = [
+  'תבנה כרטיסיות מהדברים החשובים במסמך',
+  'רק המושגים המודגשים בשקף',
+  'תוסיף שאלה על הקבוצה הפוספודיאסטר',
+];
+const MAX_PDF_BYTES = 9 * 1024 * 1024;
+
+function readAsBase64(file){
+  return new Promise(function(resolve, reject){
+    const fr = new FileReader();
+    fr.onload = function(){
+      const s = String(fr.result);
+      resolve(s.slice(s.indexOf(',') + 1));
+    };
+    fr.onerror = function(){ reject(new Error('לא הצלחתי לקרוא את הקובץ')); };
+    fr.readAsDataURL(file);
+  });
+}
+
+/* תמונה מכווצת, PDF נשלח כמו שהוא */
+function prepFile(file){
+  if(file.type === 'application/pdf'){
+    if(file.size > MAX_PDF_BYTES)
+      return Promise.reject(new Error('ה-PDF גדול מ-9MB. פצל אותו או שלח פרק.'));
+    return readAsBase64(file).then(function(data){
+      return {media_type:'application/pdf', data:data, name:file.name || 'מסמך.pdf'};
+    });
+  }
+  if(file.type && file.type.indexOf('image/') === 0){
+    return shrinkImage(file).then(function(img){
+      return {media_type:img.media_type, data:img.data, name:file.name || 'תמונה'};
+    });
+  }
+  return Promise.reject(new Error('אפשר לצרף תמונות או PDF בלבד.'));
+}
+
 function openAddSheet(){
   const bg = document.createElement('div');
   bg.className = 'sheet-bg';
-  bg.innerHTML =
-    '<div class="sheet" role="dialog" aria-modal="true" aria-label="הוספת שאלה">'+
-      '<div class="sheet-head"><h2>הוסף שאלה או תיקון</h2>'+
-        '<button id="sheetClose">סגור</button></div>'+
-      '<p class="hint">צלם שקף מההרצאה, כתוב בקשה, או שניהם. Claude יקרא, '+
-        'ינסח את הפריטים ויעלה גרסה חדשה של האתר. לוקח כדקה־שתיים.</p>'+
-      '<div class="examples">'+EXAMPLES.map(function(e,i){
-        return '<button data-ex="'+i+'">'+esc(e)+'</button>'; }).join('')+'</div>'+
-      '<div><label>שקפים</label>'+
-        '<button class="pick" id="addPick">'+icon('camera')+' צלם או בחר תמונות</button>'+
-        '<input id="addFile" type="file" accept="image/*" multiple hidden>'+
-        '<div class="shots" id="addShots"></div></div>'+
-      '<div><label for="addTxt">הבקשה</label>'+
-        '<textarea id="addTxt" placeholder="אפשר להשאיר ריק אם צירפת שקף. או: תוסיף שאלה על קבוצת הסולפט ואת התפקיד שלה"></textarea></div>'+
-      '<div><label for="addDeck">לאיזו חבילה</label>'+
-        '<select id="addDeck">'+
-          '<option value="auto">שיקבע לבד</option>'+
-          DECKS.map(function(d){ return '<option value="'+d.id+'">'+esc(d.title)+'</option>'; }).join('')+
-        '</select></div>'+
-      '<button class="send" id="addSend">שלח</button>'+
-      '<div class="status" id="addStatus" hidden></div>'+
-    '</div>';
-  document.body.appendChild(bg);
+  const chat = [];          /* {role, text, files:[{media_type,data,name}]} */
+  let tray = [];            /* קבצים שממתינים לשליחה */
+  let busy = false;
 
-  const txt = bg.querySelector('#addTxt');
-  const status = bg.querySelector('#addStatus');
-  const send = bg.querySelector('#addSend');
-  const fileInput = bg.querySelector('#addFile');
-  const shotsBox = bg.querySelector('#addShots');
-  const shots = [];
+  function close(){ bg.remove(); }
 
-  function drawShots(){
-    shotsBox.innerHTML = shots.map(function(sh, i){
-      return '<div class="shot"><img alt="שקף '+(i+1)+'" src="data:'+sh.media_type+';base64,'+sh.data+'">'+
-        '<button data-rm="'+i+'" aria-label="הסר">×</button></div>';
-    }).join('');
-    Array.prototype.forEach.call(shotsBox.querySelectorAll('button'), function(b){
-      b.addEventListener('click', function(){ shots.splice(+b.dataset.rm, 1); drawShots(); });
+  function fileHTML(f, small){
+    if(f.media_type === 'application/pdf')
+      return '<span class="doc">'+esc(f.name || 'PDF')+'</span>';
+    return '<img alt="'+esc(f.name||'תמונה')+'" src="data:'+f.media_type+';base64,'+f.data+'">';
+  }
+
+  function draw(){
+    const log = chat.map(function(m){
+      if(m.role === 'sys')  return '<div class="bub sys">'+esc(m.text)+'</div>';
+      if(m.role === 'done') return '<div class="bub done">'+esc(m.text)+'</div>';
+      const cls = m.role === 'user' ? 'me' : 'ai';
+      return '<div class="bub '+cls+'">'+esc(m.text || '')+
+        ((m.files && m.files.length)
+          ? '<div class="files">'+m.files.map(function(f){ return fileHTML(f); }).join('')+'</div>'
+          : '')+
+      '</div>';
+    }).join('') + (busy
+      ? '<div class="bub ai"><span class="typing"><i></i><i></i><i></i></span></div>' : '');
+
+    bg.innerHTML =
+      '<div class="sheet" role="dialog" aria-modal="true" aria-label="הוספת תוכן">'+
+        '<div class="sheet-head"><h2>הוספת תוכן</h2><button id="cClose">סגור</button></div>'+
+        (chat.length ? '' :
+          '<p class="hint">צרף PDF או צילום שקף, או פשוט תאר מה להוסיף. '+
+            'אפשר גם להדביק תמונה מהלוח עם Ctrl+V. אני אשאל לפני שאבנה הרבה כרטיסים.</p>'+
+          '<div class="examples">'+CHAT_EXAMPLES.map(function(x){
+            return '<button class="ex" data-ex="'+esc(x)+'">'+esc(x)+'</button>';
+          }).join('')+'</div>')+
+        '<div class="chat"><div class="chat-log" id="cLog">'+log+'</div>'+
+          '<div class="composer">'+
+            (tray.length
+              ? '<div class="tray">'+tray.map(function(f,i){
+                  return '<div class="chip-f">'+
+                    (f.media_type==='application/pdf'
+                      ? '<span>'+esc((f.name||'PDF').slice(0,18))+'</span>'
+                      : '<img alt="" src="data:'+f.media_type+';base64,'+f.data+'">')+
+                    '<button data-rm="'+i+'" aria-label="הסר">×</button></div>';
+                }).join('')+'</div>'
+              : '')+
+            '<div class="row-in">'+
+              '<button id="cAttach" aria-label="צרף קובץ">'+icon('camera')+'</button>'+
+              '<textarea id="cTxt" rows="1" placeholder="כתוב הודעה"'+(busy?' disabled':'')+'></textarea>'+
+              '<button class="go" id="cSend" aria-label="שלח"'+(busy?' disabled':'')+'>'+icon('send')+'</button>'+
+            '</div>'+
+            '<input id="cFile" type="file" accept="image/*,application/pdf" multiple hidden>'+
+          '</div>'+
+        '</div>'+
+      '</div>';
+
+    const logEl = bg.querySelector('#cLog');
+    logEl.scrollTop = logEl.scrollHeight;
+    wire();
+  }
+
+  function say(text){ chat.push({role:'sys', text:text}); draw(); }
+
+  function addFiles(list){
+    const room = 6 - tray.length;
+    const files = Array.prototype.slice.call(list, 0, Math.max(0, room));
+    if(!files.length){ say('אפשר לצרף עד שישה קבצים בהודעה.'); return; }
+    busy = true; draw();
+    Promise.all(files.map(prepFile)).then(function(prepped){
+      prepped.forEach(function(f){ tray.push(f); });
+      busy = false; draw();
+    }).catch(function(err){
+      busy = false; draw(); say(err.message);
     });
   }
-  bg.querySelector('#addPick').addEventListener('click', function(){ fileInput.click(); });
-  fileInput.addEventListener('change', function(){
-    const files = Array.prototype.slice.call(fileInput.files, 0, MAX_SHOTS - shots.length);
-    fileInput.value = '';
-    if(!files.length){ say('bad','אפשר לצרף עד '+MAX_SHOTS+' תמונות.'); return; }
-    say('work','מכווץ תמונות…');
-    Promise.all(files.map(shrinkImage)).then(function(list){
-      list.forEach(function(x){ shots.push(x); });
-      drawShots();
-      status.hidden = true;
-    }).catch(function(err){ say('bad', err.message); });
-  });
-  function close(){ bg.remove(); document.removeEventListener('keydown', onKey); }
-  function onKey(e){ if(e.key==='Escape') close(); }
-  document.addEventListener('keydown', onKey);
-  bg.addEventListener('click', function(e){ if(e.target===bg) close(); });
-  bg.querySelector('#sheetClose').addEventListener('click', close);
-  Array.prototype.forEach.call(bg.querySelectorAll('.examples button'), function(b){
-    b.addEventListener('click', function(){ txt.value = EXAMPLES[+b.dataset.ex]; txt.focus(); });
-  });
-  txt.focus();
 
-  function say(cls, msg){ status.hidden=false; status.className='status '+cls; status.textContent=msg; }
+  function send(){
+    const txt = bg.querySelector('#cTxt');
+    const body = (txt ? txt.value : '').trim();
+    if(!body && !tray.length) return;
 
-  send.addEventListener('click', function(){
-    const body = txt.value.trim();
-    if(!body && !shots.length){ say('bad','צרף שקף או כתוב מה להוסיף.'); txt.focus(); return; }
-    send.disabled = true;
-    say('work', shots.length ? 'Claude קורא את השקפים ובונה מהם שאלות…'
-                             : 'Claude כותב את הפריט ומעדכן את התוכן…');
-    callFn(CFG.addQuestionUrl,
-      { request:body, deck:bg.querySelector('#addDeck').value, images:shots }
-    ).then(function(res){
-      if(!res.ok) logError('function', 'add-question → ' + res.status + ' ' + (res.body.error||''), null);
-      if(res.status===401){ say('bad', res.body.error || 'ההתחברות נדחתה.'); send.disabled=false; return; }
-      if(!res.ok){ say('bad', res.body.error || ('השרת החזיר '+res.status)); send.disabled=false; return; }
-      /* הכתיבה למסד מיידית — מרעננים את הספרייה ומראים את התוצאה */
+    chat.push({role:'user', text:body, files:tray.slice()});
+    tray = [];
+    busy = true; draw();
+
+    const payload = chat
+      .filter(function(m){ return m.role === 'user' || m.role === 'assistant'; })
+      .map(function(m){ return {role:m.role, text:m.text, files:m.files || []}; });
+
+    callFn(CFG.addQuestionUrl, {messages:payload}).then(function(res){
+      busy = false;
+      if(!res.ok){
+        logError('function', 'add-question → ' + res.status + ' ' + (res.body.error||''), null);
+        chat.push({role:'sys', text: res.body.error || ('השרת החזיר ' + res.status)});
+        draw();
+        return;
+      }
       const b = res.body;
-      say('work', (b.summary || 'נוסף.') + ' מרענן את הספרייה…');
-      syncLibrary().then(function(){
-        const where = b.deck ? ' ל־' + b.deck : '';
-        say('ok', (b.summary || 'נוסף.') +
-          (b.created ? ' נוצר נושא חדש: ' + (b.deck || '') + '.'
-                     : (b.added || (b.ids && b.ids.length) || '') + ' פריטים נוספו' + where + '.') +
-          ' כבר בספרייה.');
-        send.textContent = 'סגור';
-        send.disabled = false;
-        send.onclick = close;
-      });
-    }).catch(function(err){
-      say('bad','לא הצלחתי להתחבר: '+err.message);
-      send.disabled = false;
+      if(b.reply) chat.push({role:'assistant', text:b.reply});
+      if(b.applied){
+        const a = b.applied;
+        chat.push({role:'done', text:
+          (a.created ? 'נוצר נושא חדש: ' + (a.deck||'') : 'נוסף ל־' + (a.deck||'')) +
+          ' · ' + (a.added || 0) + ' פריטים'});
+        syncLibrary();
+      }
+      draw();
     });
+  }
+
+  function wire(){
+    bg.querySelector('#cClose').addEventListener('click', close);
+    Array.prototype.forEach.call(bg.querySelectorAll('.ex'), function(b){
+      b.addEventListener('click', function(){
+        const t = bg.querySelector('#cTxt');
+        t.value = b.dataset.ex; t.focus();
+      });
+    });
+    Array.prototype.forEach.call(bg.querySelectorAll('[data-rm]'), function(b){
+      b.addEventListener('click', function(){ tray.splice(+b.dataset.rm, 1); draw(); });
+    });
+    const fileInput = bg.querySelector('#cFile');
+    bg.querySelector('#cAttach').addEventListener('click', function(){ fileInput.click(); });
+    fileInput.addEventListener('change', function(){
+      const l = fileInput.files; fileInput.value = '';
+      if(l && l.length) addFiles(l);
+    });
+    const sendBtn = bg.querySelector('#cSend');
+    if(sendBtn) sendBtn.addEventListener('click', send);
+    const txt = bg.querySelector('#cTxt');
+    if(txt){
+      txt.addEventListener('keydown', function(e){
+        if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); send(); }
+      });
+      txt.addEventListener('input', function(){
+        txt.style.height = 'auto';
+        txt.style.height = Math.min(120, txt.scrollHeight) + 'px';
+      });
+      if(!busy) txt.focus();
+    }
+  }
+
+  /* הדבקה מהלוח — צילום מסך ישר לתוך השיחה */
+  bg.addEventListener('paste', function(e){
+    const items = (e.clipboardData && e.clipboardData.items) || [];
+    const files = [];
+    for(let i=0;i<items.length;i++){
+      if(items[i].kind === 'file'){
+        const f = items[i].getAsFile();
+        if(f) files.push(f);
+      }
+    }
+    if(files.length){ e.preventDefault(); addFiles(files); }
   });
+  /* גרירה לתוך החלון */
+  bg.addEventListener('dragover', function(e){ e.preventDefault(); });
+  bg.addEventListener('drop', function(e){
+    if(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length){
+      e.preventDefault(); addFiles(e.dataTransfer.files);
+    }
+  });
+  bg.addEventListener('click', function(e){ if(e.target === bg) close(); });
+
+  document.body.appendChild(bg);
+  draw();
 }
 
 /* ===========================================================

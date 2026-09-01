@@ -719,6 +719,48 @@ try {
   check(merged.calls === 1, 'נשלחו ' + merged.calls + ' בקשות הגדרות במקום אחת');
 }
 
+/* 5q — צ'אט ההוספה: היסטוריה, צירוף קבצים, והדבקה מהלוח */
+{
+  const src = win.eval('openAddSheet.toString()');
+  check(src.indexOf("addEventListener('paste'") > -1, 'אין הדבקה מהלוח');
+  check(src.indexOf("addEventListener('drop'") > -1, 'אין גרירת קובץ');
+  check(src.indexOf('messages:payload') > -1, 'הצ׳אט לא שולח היסטוריה');
+  check(src.indexOf('application/pdf') > -1, 'אין תמיכה ב-PDF');
+  check(win.eval('typeof prepFile') === 'function', 'אין הכנת קובץ לשליחה');
+
+  /* PDF נשלח כמו שהוא; תמונה מכווצת */
+  const kinds = JSON.parse(await win.eval(`(function(){
+    function fakeFile(type, size, name){
+      const blob = new Blob([new Uint8Array(size)], {type:type});
+      return new File([blob], name, {type:type});
+    }
+    const pdf = fakeFile('application/pdf', 1000, 'x.pdf');
+    return prepFile(pdf).then(function(f){
+      return JSON.stringify({type:f.media_type, named:!!f.name});
+    }).catch(function(e){ return JSON.stringify({error:e.message}); });
+  })()`));
+  check(kinds.type === 'application/pdf', 'PDF לא נשלח כמסמך: ' + JSON.stringify(kinds));
+  check(kinds.named, 'שם הקובץ לא נשמר');
+
+  /* קובץ לא נתמך נדחה בלקוח, לא בשרת */
+  const bad = JSON.parse(await win.eval(`(function(){
+    const blob = new Blob([new Uint8Array(10)], {type:'application/zip'});
+    const f = new File([blob], 'a.zip', {type:'application/zip'});
+    return prepFile(f).then(function(){ return JSON.stringify({rejected:false}); })
+      .catch(function(e){ return JSON.stringify({rejected:true, msg:e.message}); });
+  })()`));
+  check(bad.rejected, 'קובץ לא נתמך לא נדחה בלקוח');
+
+  /* PDF ענק נדחה לפני שליחה */
+  const big = JSON.parse(await win.eval(`(function(){
+    const blob = new Blob([new Uint8Array(10 * 1024 * 1024)], {type:'application/pdf'});
+    const f = new File([blob], 'big.pdf', {type:'application/pdf'});
+    return prepFile(f).then(function(){ return JSON.stringify({rejected:false}); })
+      .catch(function(e){ return JSON.stringify({rejected:true, msg:e.message}); });
+  })()`));
+  check(big.rejected, 'PDF מעל התקרה לא נדחה בלקוח');
+}
+
 /* 6 — בלי מפגש שמור, מסך הנעילה מופיע ושום דבר אחר לא */
 {
   const locked = new JSDOM(html, {

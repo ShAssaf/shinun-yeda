@@ -111,9 +111,13 @@ function validateItem(deck: DeckKey, item: Record<string, unknown>, i: number, e
 }
 
 const MAX_CARDS = 200;
-const MAX_IMAGES = 4;
-const MAX_IMAGE_BYTES = 5_000_000;          /* אחרי base64, לכל התמונות יחד */
+const MAX_FILES = 6;
+/* התקרה של ה-API היא 32MB לבקשה ו-600 עמודים למסמך. אנחנו נמוכים
+   מזה בהרבה, כי base64 מנפח ב-33% ולפונקציה יש תקרת גוף משלה. */
+const MAX_TOTAL_B64 = 14_000_000;
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+const DOC_TYPES = ['application/pdf'];
+const MAX_TURNS = 20;
 
 function validateTopic(item: Record<string, unknown>, i: number, errs: string[]) {
   const path = `topics[${i}]`;
@@ -182,7 +186,19 @@ async function authorize(req: Request, body: { passphrase?: string }, pass: stri
 /* ---------- הנחיה ל-Claude ---------- */
 
 const SYSTEM = `אתה עורך התוכן של אפליקציית שינון, בעברית.
-המשתמש מבקש להוסיף פריטים או לתקן קיימים. אתה מחזיר אותם בכלי propose_content בלבד.
+המשתמש מבקש להוסיף פריטים או לתקן קיימים. זו שיחה. אתה יכול לענות בטקסט — לשאול שאלת הבהרה, להציע מה לבנות, או
+לדווח מה מצאת במסמך — וכשברור מה לעשות, אתה קורא לכלי propose_content.
+
+מתי לענות בטקסט ומתי לקרוא לכלי:
+- קובץ גדול או בקשה רחבה ("תבנה ממנו כרטיסיות") — קודם אמור בקצרה מה
+  יש במסמך וכמה כרטיסים אתה מציע, ושאל אם להתקדם. אל תבנה עשרות
+  כרטיסים בלי לוודא.
+- בקשה ממוקדת וברורה — פשוט בצע וקרא לכלי.
+- אחרי אישור של המשתמש — קרא לכלי בלי לשאול שוב.
+
+כשמצורף PDF: קרא אותו, זהה את מה שבאמת נבחן — הגדרות, מנגנונים,
+מספרים שצריך לזכור, יחסים בין מושגים. דלג על מבואות, ביבליוגרפיה
+ותודות. אם המסמך ארוך, התמקד בעיקר וציין מה השארת בחוץ.
 
 לכל נושא יש סוג (kind) שקובע את מבנה הפריטים שלו:
 
@@ -348,9 +364,13 @@ Deno.serve(async (req) => {
   };
   if (!env.key) return json({ error: 'חסר ANTHROPIC_API_KEY' }, 500);
 
-  type Shot = { media_type: string; data: string };
+  type Attachment = { media_type: string; data: string; name?: string };
+  type Turn = { role: 'user' | 'assistant'; text?: string; files?: Attachment[] };
   let body: {
-    passphrase?: string; request?: string; deck?: string; check?: boolean; images?: Shot[];
+    passphrase?: string; check?: boolean;
+    messages?: Turn[];
+    /* תאימות לאחור לגרסה החד־פעמית */
+    request?: string; images?: Attachment[];
   };
   try { body = await req.json(); } catch { return json({ error: 'גוף הבקשה אינו JSON' }, 400); }
 
@@ -363,17 +383,31 @@ Deno.serve(async (req) => {
   const bearer = req.headers.get('Authorization')?.replace(/^Bearer\s+/i, '').trim();
   if (!bearer) return json({ error: 'כתיבה למסד דורשת התחברות, לא סיסמה.' }, 403);
 
-  const ask = (body.request ?? '').trim();
-  const shots = Array.isArray(body.images) ? body.images.slice(0, MAX_IMAGES) : [];
-  if (!ask && !shots.length) return json({ error: 'הבקשה ריקה' }, 400);
-  if (ask.length > 2000) return json({ error: 'הבקשה ארוכה מדי' }, 400);
-  let bytes = 0;
-  for (const sh of shots) {
-    if (!IMAGE_TYPES.includes(sh?.media_type)) return json({ error: 'סוג תמונה לא נתמך' }, 400);
-    if (typeof sh?.data !== 'string' || !sh.data) return json({ error: 'תמונה ריקה' }, 400);
-    bytes += sh.data.length;
+  /* שיחה. הגרסה הישנה שלחה request+images — ממירים אותה לתור אחד. */
+  const turns: Turn[] = Array.isArray(body.messages) && body.messages.length
+    ? body.messages.slice(-MAX_TURNS)
+    : [{ role: 'user', text: body.request ?? '', files: body.images ?? [] }];
+
+  let bytes = 0, fileCount = 0, hasText = false;
+  for (const t of turns) {
+    if (t.role !== 'user' && t.role !== 'assistant')
+      return json({ error: 'תפקיד לא חוקי בשיחה' }, 400);
+    if (typeof t.text === 'string' && t.text.trim()) hasText = true;
+    if ((t.text ?? '').length > 4000) return json({ error: 'הודעה ארוכה מדי' }, 400);
+    for (const f of (t.files ?? [])) {
+      fileCount++;
+      const ok = IMAGE_TYPES.includes(f?.media_type) || DOC_TYPES.includes(f?.media_type);
+      if (!ok) return json({ error: `סוג קובץ לא נתמך: ${f?.media_type}` }, 400);
+      if (typeof f?.data !== 'string' || !f.data) return json({ error: 'קובץ ריק' }, 400);
+      bytes += f.data.length;
+    }
   }
-  if (bytes > MAX_IMAGE_BYTES) return json({ error: 'התמונות כבדות מדי. צרף פחות שקפים.' }, 400);
+  if (!hasText && !fileCount) return json({ error: 'ההודעה ריקה' }, 400);
+  if (fileCount > MAX_FILES) return json({ error: `עד ${MAX_FILES} קבצים` }, 400);
+  if (bytes > MAX_TOTAL_B64)
+    return json({ error: 'הקבצים כבדים מדי. פצל את המסמך או צרף פחות.' }, 400);
+
+  const shots = turns.flatMap((t) => t.files ?? []);
 
   try {
     const rest = db(bearer);
@@ -386,35 +420,66 @@ Deno.serve(async (req) => {
       id: d.id, kind: d.kind, title: d.title, items: d.item_count,
     }));
 
-    const userContent: Anthropic.ContentBlockParam[] = shots.map((sh) => ({
-      type: 'image' as const,
-      source: { type: 'base64' as const, media_type: sh.media_type as 'image/jpeg', data: sh.data },
+    /* מסמכים ותמונות לפני הטקסט — כך ממליץ התיעוד, והמודל מתייחס
+       אליהם כהקשר להודעה. PDF נשלח כבלוק document ב-base64. */
+    function blocksFor(t: Turn): Anthropic.ContentBlockParam[] {
+      const out: Anthropic.ContentBlockParam[] = [];
+      for (const f of (t.files ?? [])) {
+        if (DOC_TYPES.includes(f.media_type)) {
+          out.push({
+            type: 'document',
+            source: { type: 'base64', media_type: 'application/pdf', data: f.data },
+          } as Anthropic.ContentBlockParam);
+        } else {
+          out.push({
+            type: 'image',
+            source: { type: 'base64', media_type: f.media_type as 'image/jpeg', data: f.data },
+          });
+        }
+      }
+      const text = (t.text ?? '').trim();
+      if (text) out.push({ type: 'text', text });
+      else if (!out.length) out.push({ type: 'text', text: '(ריק)' });
+      return out;
+    }
+
+    const convo: Anthropic.MessageParam[] = turns.map((t) => ({
+      role: t.role,
+      content: blocksFor(t),
     }));
-    userContent.push({
-      type: 'text',
-      text: `הנושאים הקיימים שלי:\n${JSON.stringify(catalogue)}\n\n`
-        + (shots.length ? `צורפו ${shots.length} צילומי שקפים.\n` : '')
-        + `בקשת המשתמש:\n${ask || '(אין טקסט — בנה מהשקפים)'}\n\n`
-        + `קרא לכלי propose_content.`,
-    });
+    /* רשימת הנושאים נצמדת להודעה האחרונה, כדי לא לשבור את המטמון
+       של תחילת השיחה */
+    const last = convo[convo.length - 1];
+    if (last && last.role === 'user' && Array.isArray(last.content)) {
+      (last.content as Anthropic.ContentBlockParam[]).push({
+        type: 'text',
+        text: `\n\n[הנושאים הקיימים שלי: ${JSON.stringify(catalogue)}]`,
+      });
+    }
 
     const t0 = Date.now();
     const stream = new Anthropic({ apiKey: env.key }).messages.stream({
       model: env.model,
-      max_tokens: shots.length ? 24000 : 8000,
+      max_tokens: 32000,
       thinking: { type: 'adaptive' },
       output_config: { effort: shots.length ? 'high' : 'medium' },
       system: SYSTEM,
       tools: [TOOL],
-      messages: [{ role: 'user', content: userContent }],
+      messages: convo,
     });
     const message = await stream.finalMessage();
     const llmSecs = Math.round((Date.now() - t0) / 1000);
 
+    const reply = message.content
+      .filter((b) => b.type === 'text')
+      .map((b) => (b as unknown as { text: string }).text)
+      .join('\n').trim();
+
     const call = message.content.find((b) => b.type === 'tool_use');
+    /* אין קריאה לכלי — זו תשובה בשיחה, לא כישלון */
     if (!call) {
-      const text = message.content.filter((b) => b.type === 'text').map((b) => b.text).join(' ');
-      return json({ error: text.slice(0, 300) || 'Claude לא החזיר פריט' }, 422);
+      return json({ ok: true, applied: null, seconds: llmSecs,
+                    reply: reply || 'לא הבנתי. תוכל לנסח אחרת?' });
     }
     const patch = call.input as {
       target: string; deck_id: string; new_title: string; new_subtitle: string;
@@ -428,7 +493,8 @@ Deno.serve(async (req) => {
     } catch (err) {
       return json({ error: 'ה-JSON שהוחזר אינו תקין: ' + (err as Error).message }, 422);
     }
-    if (!items.length) return json({ error: patch.summary || 'לא נוצר פריט' }, 422);
+    if (!items.length) return json({ ok: true, applied: null, seconds: llmSecs,
+      reply: reply || patch.summary || 'לא נוצר פריט.' });
 
     /* ---------- נושא חדש ---------- */
     if (patch.target === 'new_topic') {
@@ -440,7 +506,9 @@ Deno.serve(async (req) => {
         if (ids.has(it.id as string)) errs.push(`המזהה ${it.id} מופיע פעמיים`);
         ids.add(it.id as string);
       });
-      if (errs.length) return json({ error: 'לא עבר אימות: ' + errs.slice(0, 4).join(' · ') }, 422);
+      if (errs.length) return json({ ok: true, applied: null, seconds: llmSecs,
+        reply: (reply ? reply + '\n\n' : '') + 'לא הצלחתי לבנות פריט תקין: ' +
+               errs.slice(0, 4).join(' · ') });
 
       /* תמיד מזהה המשתמש עצמו. שאילתה על שורה קיימת הייתה עלולה
          להחזיר בעלים של נושא ציבורי של מישהו אחר. */
@@ -455,8 +523,9 @@ Deno.serve(async (req) => {
         item_count: items.length,
       }]) as Deck[];
       return json({
-        ok: true, summary: patch.summary, deck: created[0]?.title,
-        deck_id: created[0]?.id, added: items.length, created: true, seconds: llmSecs,
+        ok: true, reply: reply, seconds: llmSecs,
+        applied: { summary: patch.summary, deck: created[0]?.title,
+                   deck_id: created[0]?.id, added: items.length, created: true },
       });
     }
 
@@ -478,7 +547,9 @@ Deno.serve(async (req) => {
       if (patch.mode === 'add' && dup) errs.push(`המזהה ${it.id} כבר קיים בנושא`);
       if (patch.mode === 'replace' && !dup) errs.push(`המזהה ${it.id} לא קיים, אין מה להחליף`);
     }
-    if (errs.length) return json({ error: 'הפריט לא עבר אימות: ' + errs.slice(0, 4).join(' · ') }, 422);
+    if (errs.length) return json({ ok: true, applied: null, seconds: llmSecs,
+      reply: (reply ? reply + '\n\n' : '') + 'הפריט לא עבר אימות: ' +
+             errs.slice(0, 4).join(' · ') });
 
     const list = sec.list.slice();
     for (const it of items) {
@@ -494,14 +565,12 @@ Deno.serve(async (req) => {
     });
 
     return json({
-      ok: true,
-      summary: patch.summary,
-      deck: full.title,
-      deck_id: full.id,
-      section: patch.section,
-      mode: patch.mode,
-      ids: items.map((i) => i.id),
-      seconds: llmSecs,
+      ok: true, reply: reply, seconds: llmSecs,
+      applied: {
+        summary: patch.summary, deck: full.title, deck_id: full.id,
+        section: patch.section, mode: patch.mode,
+        added: items.length, ids: items.map((i) => i.id),
+      },
     });
   } catch (err) {
     console.error(err);
