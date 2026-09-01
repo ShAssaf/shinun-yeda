@@ -271,6 +271,25 @@ try {
   fail.push('מסך הסטטיסטיקה נפל: ' + e.message);
 }
 
+/* 5e — ייבוא ערכת הפתיחה מדווח שגיאה במקום להיכשל בשקט */
+{
+  /* הקריאה עצמה דורשת שרת; נבדק כאן החוזה שמונע כישלון שקט */
+  const shape = win.eval(`(function(){
+    const src = importStarter.toString();
+    return JSON.stringify({
+      returnsObject: src.indexOf('{ok:false') > -1,
+      reportsServer: src.indexOf('השרת דחה') > -1,
+      ensuresUid: src.indexOf('loadIdentity()') > -1,
+      matchesByTitle: src.indexOf('x.title===d.title') > -1
+    });
+  })()`);
+  const c = JSON.parse(shape);
+  check(c.returnsObject, 'הייבוא לא מחזיר תוצאה עם שגיאה');
+  check(c.reportsServer, 'הייבוא לא מדווח את שגיאת השרת');
+  check(c.ensuresUid, 'הייבוא לא משלים uid חסר');
+  check(c.matchesByTitle, 'הייבוא מתאים שורות לפי מיקום ולא לפי זהות');
+}
+
 /* 6 — בלי מפגש שמור, מסך הנעילה מופיע ושום דבר אחר לא */
 {
   const locked = new JSDOM(html, {

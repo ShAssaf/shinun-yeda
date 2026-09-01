@@ -1181,8 +1181,14 @@ function setVisibility(deckId, vis){
    לכל משתמש חדש עותק של תוכן שלא ביקש, וזה נראה כאילו הוא רואה חבילות
    של מישהו אחר. */
 function importStarter(){
-  if(!canSync() || !AUTH.uid) return Promise.resolve(false);
-  return Promise.resolve().then(function(){
+  if(!canSync()) return Promise.resolve({ok:false, error:'אין חיבור לשרת.'});
+
+  /* מפגש שנוצר לפני שהוספנו uid — משלימים אותו לפני שמנסים לכתוב */
+  const ready = AUTH.uid ? Promise.resolve() : loadIdentity();
+
+  return ready.then(function(){
+    if(!AUTH || !AUTH.uid) return {ok:false, error:'לא הצלחתי לזהות את המשתמש. התחבר מחדש.'};
+
     const rows = localRows().map(function(r){
       const count = r.kind==='iso'
         ? (r.data.iso.length + r.data.isoTerms.length)
@@ -1192,24 +1198,35 @@ function importStarter(){
               _oldPrefix:r.id + ':'};
     });
     const payload = rows.map(function(r){ const c=Object.assign({},r); delete c._oldPrefix; return c; });
+
     return rest('decks', {
       method:'POST',
       headers: Object.assign(restHeaders(), {Prefer:'return=representation'}),
       body: JSON.stringify(payload)
-    }).then(function(r){ return r.ok ? r.json() : null; })
-      .then(function(created){
-        if(!created) return false;
-        return Promise.all(created.map(function(d, i){
+    }).then(function(r){
+      if(!r.ok) return r.text().then(function(t){
+        let msg = t;
+        try{ msg = JSON.parse(t).message || t; }catch(e){}
+        return {ok:false, error:'השרת דחה: ' + String(msg).slice(0,160)};
+      });
+      return r.json().then(function(created){
+        if(!created || !created.length) return {ok:false, error:'לא נוצרו נושאים.'};
+        return Promise.all(created.map(function(d){
+          /* התאמה לפי סוג וכותרת ולא לפי מיקום — סדר ההחזרה אינו מובטח */
+          const src = rows.filter(function(x){ return x.kind===d.kind && x.title===d.title; })[0];
           return subscribe(d.id).then(function(){
-            /* העברת היסטוריית התזמון למזהה החדש */
+            if(!src) return null;
             return rest('rpc/remap_card_keys', {
               method:'POST', headers:restHeaders(),
-              body: JSON.stringify({old_prefix: rows[i]._oldPrefix, deck: d.id})
+              body: JSON.stringify({old_prefix: src._oldPrefix, deck: d.id})
             });
           });
-        })).then(function(){ return true; });
+        })).then(function(){ return {ok:true, count:created.length}; });
       });
-  }).catch(function(){ return false; });
+    });
+  }).catch(function(err){
+    return {ok:false, error:'נכשל: ' + (err && err.message ? err.message : 'שגיאה לא ידועה')};
+  });
 }
 
 /* טעינת הספרייה: מהשרת אם אפשר, אחרת מהמראה המקומי,
@@ -1494,8 +1511,7 @@ function renderHome(){
       '<div class="stat"><b>'+(store.rounds||0)+'</b><span>סבבים</span></div>'+
     '</button>'+
     (!DECKS.length
-      ? '<p class="note">אין עדיין נושאים בספרייה שלך.</p>'+
-        (canSync() ? '<button class="btn primary go" id="seedHome">ייבא את ערכת הפתיחה</button>' : '')
+      ? '<p class="note">אין עדיין נושאים בספרייה שלך. פתח את מאגר הנושאים כדי להוסיף.</p>'
       : totalDue
         ? '<button class="btn primary go" id="goBtn">חזרה עכשיו · '+
             Math.min(totalDue, ROUND)+' כרטיסים</button>'
@@ -1536,14 +1552,6 @@ function renderHome(){
   app.querySelector('#examBtn').addEventListener('click', openExamSheet);
   const sb = app.querySelector('#storeBtn');
   if(sb) sb.addEventListener('click', function(){ openStore(); });
-  const sh = app.querySelector('#seedHome');
-  if(sh) sh.addEventListener('click', function(){
-    sh.disabled = true; sh.textContent = 'מייבא…';
-    importStarter().then(function(ok){
-      if(!ok){ sh.disabled = false; sh.textContent = 'הייבוא נכשל — נסה שוב'; return; }
-      loadLibrary();
-    });
-  });
   app.querySelector('#statsBtn').addEventListener('click', function(){
     view={name:'stats'}; loadStats();
   });
@@ -2308,8 +2316,13 @@ function renderStore(){
   const seedB = app.querySelector('#seedBtn');
   if(seedB) seedB.addEventListener('click', function(){
     seedB.disabled = true; seedB.textContent = 'מייבא…';
-    importStarter().then(function(ok){
-      if(!ok){ seedB.disabled = false; seedB.textContent = 'ייבא'; return; }
+    importStarter().then(function(res){
+      if(!res.ok){
+        seedB.disabled = false; seedB.textContent = 'ייבא';
+        view.err = res.error || 'הייבוא נכשל.';
+        render();
+        return;
+      }
       return loadLibrary().then(function(){ openStore(); });
     });
   });
