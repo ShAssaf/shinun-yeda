@@ -363,6 +363,32 @@ h1{
 .gbtn:hover{border-color:var(--accent)}
 .gbtn svg{flex:none}
 
+/* ---------- מסך נעילה ---------- */
+.lock{
+  flex:1;display:flex;flex-direction:column;justify-content:center;
+  gap:18px;padding:32px 0;max-width:360px;margin:0 auto;width:100%;
+}
+.lock h1{margin:6px 0 0}
+.lock .lede{margin:0}
+.lock .alt{
+  font-size:13px;color:var(--ink-2);text-align:center;
+  text-decoration:underline;text-underline-offset:3px;width:100%;padding:4px;
+}
+.lock .alt:hover{color:var(--accent)}
+.lock input{
+  width:100%;background:var(--surface);color:var(--ink);border:1px solid var(--line);
+  border-radius:11px;padding:12px;font:inherit;font-size:15px;
+}
+.lock .send{
+  background:var(--accent);color:var(--on-accent);border-radius:12px;
+  padding:13px;font-size:15px;font-weight:500;width:100%;
+}
+.lock .send:disabled{opacity:.5;cursor:default}
+.lock .err{
+  border:1px solid var(--bad);background:var(--bad-bg);color:var(--bad);
+  border-radius:11px;padding:10px 12px;font-size:13.5px;line-height:1.5;
+}
+
 @media (prefers-reduced-motion: reduce){*{transition-duration:.01ms !important;animation-duration:.01ms !important}}
 </style>
 
@@ -1102,14 +1128,17 @@ function signIn(){
 function signOut(){ AUTH = null; authWrite(null); render(); }
 
 function loadIdentity(){
-  if(!AUTH || !AUTH.access || AUTH.email) return Promise.resolve();
+  if(!AUTH || AUTH.viaPass || !AUTH.access || AUTH.email) return Promise.resolve();
   return fetch(CFG.supabaseUrl + '/auth/v1/user', {
     headers:{ apikey: CFG.supabaseKey, Authorization: 'Bearer ' + AUTH.access }
   }).then(function(r){ return r.ok ? r.json() : null; })
     .then(function(u){
-      if(u && u.email){ AUTH.email = u.email; authWrite(AUTH); render(); }
-      else { AUTH = null; authWrite(null); }
-    }).catch(function(){});
+      if(u && u.email){ AUTH.email = u.email; authWrite(AUTH); render(); return; }
+      /* אולי רק פג — מנסים לרענן לפני שמנתקים */
+      return refreshToken().then(function(ok){
+        if(!ok){ AUTH = null; authWrite(null); render(); }
+      });
+    }).catch(function(){});   /* אופליין — משאירים את המשתמש בפנים */
 }
 
 function refreshToken(){
@@ -1299,7 +1328,71 @@ function renderLab(){
   });
 }
 
+/* ===========================================================
+   מסך נעילה — האפליקציה כולה מאחורי התחברות.
+   השער כאן הוא נוכחות טוקן שמור, לא אימות חי, כדי שהתרגול
+   ימשיך לעבוד אופליין. האימות האמיתי קורה בשרת בכל עריכה.
+   מסלול הסיסמה קיים כי גוגל חוסמת OAuth בתוך WebView מוטמע,
+   כלומר בתוך ה-APK.
+   =========================================================== */
+function renderLock(){
+  const showPass = view.lockPass || false;
+  app.innerHTML =
+  '<div class="lock">'+
+    '<header>'+
+      '<div class="eyebrow">ביוכימיה · הכנה למבחן</div>'+
+      '<h1>שינון</h1>'+
+      '<p class="lede">התחבר כדי להיכנס.</p>'+
+    '</header>'+
+    (view.lockErr ? '<div class="err">'+esc(view.lockErr)+'</div>' : '')+
+    (showPass
+      ? '<input id="lockPass" type="password" autocomplete="current-password" placeholder="סיסמה">'+
+        '<button class="send" id="lockGo"'+(view.lockBusy?' disabled':'')+'>'+
+          (view.lockBusy?'בודק…':'כניסה')+'</button>'+
+        '<button class="alt" id="lockToggle">חזרה להתחברות עם גוגל</button>'
+      : '<button class="gbtn" id="lockGoogle">'+icon('google')+' התחברות עם גוגל</button>'+
+        '<button class="alt" id="lockToggle">כניסה עם סיסמה</button>')+
+  '</div>';
+
+  const tg = app.querySelector('#lockToggle');
+  tg.addEventListener('click', function(){
+    view.lockPass = !showPass; view.lockErr = null; render();
+  });
+  const gg = app.querySelector('#lockGoogle');
+  if(gg) gg.addEventListener('click', signIn);
+
+  const go = app.querySelector('#lockGo');
+  if(go) go.addEventListener('click', function(){
+    const pass = app.querySelector('#lockPass').value.trim();
+    if(!pass){ view.lockErr='צריך סיסמה.'; render(); return; }
+    view.lockBusy = true; view.lockErr = null; render();
+    /* אימות מול השרת — check אינו כותב דבר ואינו צורך טוקנים */
+    fetch(CFG.addQuestionUrl, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({passphrase:pass, check:true})
+    }).then(function(r){
+      view.lockBusy = false;
+      if(r.status===401){ view.lockErr='סיסמה שגויה.'; render(); return; }
+      if(!r.ok){ view.lockErr='השרת החזיר '+r.status; render(); return; }
+      setPass(pass);
+      AUTH = {access:null, refresh:null, email:'סיסמה', viaPass:true};
+      authWrite(AUTH);
+      view = {name:'home'};
+      render();
+    }).catch(function(err){
+      view.lockBusy = false; view.lockErr = 'לא הצלחתי להתחבר: '+err.message; render();
+    });
+  });
+
+  const inp = app.querySelector('#lockPass');
+  if(inp){
+    inp.focus();
+    inp.addEventListener('keydown', function(e){ if(e.key==='Enter') go.click(); });
+  }
+}
+
 function render(){
+  if(authEnabled && !AUTH){ renderLock(); window.scrollTo(0,0); return; }
   if(quiz && quiz.done) renderResults();
   else if(quiz) renderQuiz();
   else if(view.name==='deck') renderDeck();

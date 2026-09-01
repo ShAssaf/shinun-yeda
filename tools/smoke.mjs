@@ -24,6 +24,9 @@ const dom = new JSDOM(html, {
   beforeParse(w) {
     w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
     w.scrollTo = () => {};   /* jsdom מגדיר stub שזורק, אז דורסים אותו */
+    /* האפליקציה חסומה מאחורי התחברות — מזריקים מפגש כדי לבדוק את מה שמאחוריו */
+    try { w.localStorage.setItem('shinun-auth',
+      JSON.stringify({ access: null, refresh: null, email: 'smoke@test', viaPass: true })); } catch {}
   },
 });
 const win = dom.window;
@@ -75,6 +78,30 @@ try {
   check(document.querySelectorAll('.opt').length === 4, 'אין 4 כפתורי תשובה');
 } catch (e) {
   fail.push('רינדור חידון נפל: ' + e.message);
+}
+
+/* 4 — בלי מפגש שמור, מסך הנעילה מופיע ושום דבר אחר לא */
+{
+  const locked = new JSDOM(html, {
+    runScripts: 'dangerously',
+    pretendToBeVisual: true,
+    url: 'https://shassaf.github.io/shinun-biochem/',
+    virtualConsole: vc,
+    beforeParse(w) {
+      w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+      w.scrollTo = () => {};
+    },
+  });
+  await new Promise((r) => locked.window.addEventListener('load', r, { once: true }));
+  const d = locked.window.document;
+  const authOn = locked.window.eval('typeof authEnabled !== "undefined" ? authEnabled : false');
+  if (authOn) {
+    check(!!d.querySelector('.lock'), 'מסך הנעילה לא נרנדר ללא מפגש');
+    check(!!d.querySelector('#lockGoogle'), 'אין כפתור התחברות עם גוגל');
+    check(!!d.querySelector('#lockToggle'), 'אין מסלול סיסמה חלופי');
+    check(!d.querySelector('.deck-list'), 'התוכן דלף אל מסך הנעילה');
+  }
+  locked.window.close();
 }
 
 dom.window.close();
