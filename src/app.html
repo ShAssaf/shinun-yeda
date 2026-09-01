@@ -1157,11 +1157,18 @@ function refreshToken(){
 }
 
 /* קריאה לפונקציה עם טוקן המשתמש. מרענן פעם אחת על 401. */
+const CALL_TIMEOUT = 170000;
 function callFn(url, payload, retried){
   const headers = {'Content-Type':'application/json'};
   if(AUTH && AUTH.access) headers.Authorization = 'Bearer ' + AUTH.access;
-  return fetch(url, {method:'POST', headers:headers, body:JSON.stringify(payload)})
+  /* גוזרים בעצמנו, אחרת חיבור שנופל מציג "Failed to fetch" בלי שום מידע */
+  const ctl = typeof AbortController==='function' ? new AbortController() : null;
+  const t0 = Date.now();
+  const timer = ctl ? setTimeout(function(){ ctl.abort(); }, CALL_TIMEOUT) : null;
+  return fetch(url, {method:'POST', headers:headers, body:JSON.stringify(payload),
+                     signal: ctl ? ctl.signal : undefined})
     .then(function(r){
+      if(timer) clearTimeout(timer);
       if(r.status===401 && AUTH && AUTH.refresh && !retried){
         return refreshToken().then(function(ok){
           if(!ok) return r.json().then(function(j){ return {ok:false, status:401, body:j}; });
@@ -1170,6 +1177,14 @@ function callFn(url, payload, retried){
       }
       return r.json().then(function(j){ return {ok:r.ok, status:r.status, body:j}; })
               .catch(function(){ return {ok:r.ok, status:r.status, body:{}}; });
+    })
+    .catch(function(err){
+      if(timer) clearTimeout(timer);
+      const secs = Math.round((Date.now()-t0)/1000);
+      const why = (err && err.name==='AbortError')
+        ? 'הבקשה נגזרה אחרי '+secs+' שניות'
+        : 'החיבור נפל אחרי '+secs+' שניות ('+(err && err.message || 'לא ידוע')+')';
+      return {ok:false, status:0, body:{error: why}};
     });
 }
 

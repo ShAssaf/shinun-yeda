@@ -340,11 +340,14 @@ Deno.serve(async (req) => {
       : '';
 
     const anthropic = new Anthropic({ apiKey: env.key });
+    const t0 = Date.now();
     const message = await anthropic.messages.create({
       model: env.model!,
-      max_tokens: 16000,
+      max_tokens: 8000,
       thinking: { type: 'adaptive' },
-      output_config: { effort: 'high' },
+      /* medium ולא high — פריט תוכן אינו משימה קשה, וזמן ריצה ארוך
+         מסתכן בתקרת הזמן של Edge Function ונופל כ-Failed to fetch */
+      output_config: { effort: 'medium' },
       system: SYSTEM,
       tools: [TOOL],
       messages: [{
@@ -359,6 +362,9 @@ Deno.serve(async (req) => {
           + `\n\nבקשת המשתמש:\n${ask}${hint}\n\nקרא לכלי propose_patch.`,
       }],
     });
+
+    const llmSecs = Math.round((Date.now() - t0) / 1000);
+    console.log(`Claude החזיר אחרי ${llmSecs}s`);
 
     const call = message.content.find((b) => b.type === 'tool_use');
     if (!call) {
@@ -442,6 +448,7 @@ Deno.serve(async (req) => {
       deck: patch.deck,
       mode: patch.mode,
       ids: items.map((i) => i.id ?? i.path),
+      seconds: llmSecs,
     });
   } catch (e) {
     console.error(e);
