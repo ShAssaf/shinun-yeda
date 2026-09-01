@@ -165,6 +165,16 @@ try {
   }
 }
 
+/* 4c — מפת האיזומרים נשענת על נתוני החבילה ולא על משתנה גלובלי */
+{
+  const isoDeck = (DECKS ?? []).find((d) => d.map);
+  if (isoDeck) {
+    win.eval(`(function(){ quiz=null; view={name:"map", back:${JSON.stringify(isoDeck.id)}}; render(); })()`);
+    const nodes = document.querySelectorAll('.node').length;
+    check(nodes >= isoDeck.map.iso.length, `המפה הציגה ${nodes} צמתים, פחות מהצפוי`);
+  }
+}
+
 /* 5 — מסך העיון נבנה לכל חבילה, וכל פריט מקבל תיאור תקין */
 for (const deck of DECKS ?? []) {
   check(typeof deck.browse === 'function', `${deck.id}: אין browse`);

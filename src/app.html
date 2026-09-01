@@ -853,23 +853,23 @@ function pickWeighted(items, n, keyFn){
    =========================================================== */
 
 /* --- חבילה 1: קבוצות פונקציונליות --- */
-function fgDistractors(t){
-  const same = shuffle(GROUPS.filter(function(g){ return g.cat===t.cat && g.id!==t.id; }));
-  const other = shuffle(GROUPS.filter(function(g){ return g.cat!==t.cat; }));
+function fgDistractors(items, t){
+  const same = shuffle(items.filter(function(g){ return g.cat===t.cat && g.id!==t.id; }));
+  const other = shuffle(items.filter(function(g){ return g.cat!==t.cat; }));
   return same.concat(other).slice(0,3);
 }
-function fgQuestion(mode){
+function fgQuestion(items, key, mode){
   const g = fgQuestion.pool.shift();
   const dir = mode==='mix' ? (Math.random()<0.5?'s2n':'n2s') : mode;
-  const opts = shuffle([g].concat(fgDistractors(g)));
+  const opts = shuffle([g].concat(fgDistractors(items, g)));
   if(dir==='s2n'){
-    return { key:'fg:'+g.id, label:'איזו קבוצה זו?',
+    return { key:key(g), label:'איזו קבוצה זו?',
       prompt:{kind:'mol', mol:g},
       optionKind:'text',
       options:opts.map(function(o){ return {id:o.id, main:o.en, ltr:true, sub:o.he}; }),
       answer:g.id, why:null };
   }
-  return { key:'fg:'+g.id, label:'איזה מבנה מתאים?',
+  return { key:key(g), label:'איזה מבנה מתאים?',
     prompt:{kind:'text', main:g.en, ltr:true, sub:g.he},
     optionKind:'pic',
     options:opts.map(function(o){ return {id:o.id, mol:o}; }),
@@ -877,13 +877,16 @@ function fgQuestion(mode){
 }
 
 /* --- חבילה 2: יסודות --- */
-function elQuestion(mode){
+function elQuestion(items, key, mode){
   const kind = mode==='mix' ? sample(['sym','name','class','role','role2'],1)[0] : mode;
   const e = elQuestion.pool.shift();
+  const BULK = items.filter(function(x){return x.cat==='bulk';});
+  const TRACE = items.filter(function(x){return x.cat==='trace';});
+  const ELEMENTS = items;
 
   if(kind==='sym'){
     const opts = shuffle([e].concat(sample(ELEMENTS.filter(function(x){return x.id!==e.id;}),3)));
-    return { key:'el:'+e.id, label:'איזה יסוד זה?',
+    return { key:key(e), label:'איזה יסוד זה?',
       prompt:{kind:'element', sym:e.sym},
       optionKind:'text',
       options:opts.map(function(o){ return {id:o.id, main:o.en, ltr:true, sub:o.he}; }),
@@ -891,7 +894,7 @@ function elQuestion(mode){
   }
   if(kind==='name'){
     const opts = shuffle([e].concat(sample(ELEMENTS.filter(function(x){return x.id!==e.id;}),3)));
-    return { key:'el:'+e.id, label:'מה הסמל?',
+    return { key:key(e), label:'מה הסמל?',
       prompt:{kind:'text', main:e.he, sub:e.en},
       optionKind:'text',
       options:opts.map(function(o){ return {id:o.id, sym:o.sym, main:o.he}; }),
@@ -903,7 +906,7 @@ function elQuestion(mode){
     const target = askTrace ? e : e;
     const foils = sample((askTrace?BULK:TRACE), 3);
     const opts = shuffle([target].concat(foils));
-    return { key:'el:'+e.id, label:'סיווג',
+    return { key:key(e), label:'סיווג',
       prompt:{kind:'text', main: askTrace?'מי מהבאים הוא יסוד קורט?':'מי מהבאים הוא יסוד עיקרי?',
               sub: askTrace?'trace element — נמצא בעקבות בלבד':'bulk element — מרכיב עיקרי של מסת הגוף'},
       optionKind:'text',
@@ -912,7 +915,7 @@ function elQuestion(mode){
   }
   if(kind==='role'){
     const opts = shuffle([e].concat(sample(ELEMENTS.filter(function(x){return x.id!==e.id;}),3)));
-    return { key:'el:'+e.id, label:'איזה יסוד ממלא את התפקיד?',
+    return { key:key(e), label:'איזה יסוד ממלא את התפקיד?',
       prompt:{kind:'text', main:e.role},
       optionKind:'text',
       options:opts.map(function(o){ return {id:o.id, sym:o.sym, main:o.he, sub:o.en}; }),
@@ -920,7 +923,7 @@ function elQuestion(mode){
   }
   /* role2 — יסוד ← תפקיד */
   const opts = shuffle([e].concat(sample(ELEMENTS.filter(function(x){return x.id!==e.id;}),3)));
-  return { key:'el:'+e.id, label:'מה התפקיד?',
+  return { key:key(e), label:'מה התפקיד?',
     prompt:{kind:'element', sym:e.sym, caption:e.he},
     optionKind:'text',
     options:opts.map(function(o){ return {id:o.id, main:o.role}; }),
@@ -928,8 +931,9 @@ function elQuestion(mode){
 }
 
 /* --- חבילה 3: איזומרים --- */
-function isoParentOf(node){ return ISO.filter(function(x){ return x.id===node.parent; })[0]; }
-function isoQuestion(mode){
+function isoParentOf(iso, node){ return iso.filter(function(x){ return x.id===node.parent; })[0]; }
+function isoQuestion(D, key, mode){
+  const ISO = D.iso, ISO_TERMS = D.isoTerms, ISO_ALL = D.all, ISO_PAIRS = D.isoPairs;
   const kind = mode==='mix' ? sample(['def','term','tree','pair'],1)[0] : mode;
 
   if(kind==='pair' || (kind==='mix')){
@@ -940,7 +944,7 @@ function isoQuestion(mode){
     const keys = Object.keys(REL);
     const foils = sample(keys.filter(function(k){ return k!==p.rel; }),3);
     const opts = shuffle([p.rel].concat(foils));
-    return { key:'iso:'+p.id, label:'מה היחס בין א ל-ב?',
+    return { key:key(p), label:'מה היחס בין א ל-ב?',
       prompt:{kind:'pair', pair:p},
       optionKind:'text',
       options:opts.map(function(k){ return {id:k, main:REL[k]}; }),
@@ -949,10 +953,10 @@ function isoQuestion(mode){
   if(kind==='tree'){
     const kids = ISO.filter(function(x){ return x.parent; });
     const node = isoQuestion.treePool.length ? isoQuestion.treePool.shift() : sample(kids,1)[0];
-    const parent = isoParentOf(node);
+    const parent = isoParentOf(ISO, node);
     const foils = sample(ISO.filter(function(x){ return x.id!==parent.id && x.id!==node.id; }),3);
     const opts = shuffle([parent].concat(foils));
-    return { key:'iso:'+node.id, label:'תחת איזו קטגוריה?',
+    return { key:key(node), label:'תחת איזו קטגוריה?',
       prompt:{kind:'text', main:node.he, sub:node.en},
       optionKind:'text',
       options:opts.map(function(o){ return {id:o.id, main:o.he, sub:o.en}; }),
@@ -962,13 +966,13 @@ function isoQuestion(mode){
   const foils = sample(ISO_ALL.filter(function(x){ return x.id!==node.id; }),3);
   const opts = shuffle([node].concat(foils));
   if(kind==='def'){
-    return { key:'iso:'+node.id, label:'איזה מונח מתאים להגדרה?',
+    return { key:key(node), label:'איזה מונח מתאים להגדרה?',
       prompt:{kind:'text', main:node.def, sub:node.ex?('דוגמה: '+node.ex):''},
       optionKind:'text',
       options:opts.map(function(o){ return {id:o.id, main:o.he, sub:o.en}; }),
       answer:node.id, why:null };
   }
-  return { key:'iso:'+node.id, label:'מה ההגדרה?',
+  return { key:key(node), label:'מה ההגדרה?',
     prompt:{kind:'text', main:node.he, sub:node.en},
     optionKind:'text',
     options:opts.map(function(o){ return {id:o.id, main:o.def}; }),
@@ -996,109 +1000,143 @@ function dLegend(deck, colors){
   const l = ((UI.decks || {})[deck] || {}).legend || {};
   return Object.keys(colors).map(function(k){ return {color:colors[k], he:l[k] || k}; });
 }
-const DECKS = [
-{ id:'fg', title:dLbl('fg','title','קבוצות פונקציונליות'), sub:dLbl('fg','sub',''), color:'var(--c-o)',
-  items:GROUPS, keyFn:function(g){return 'fg:'+g.id;},
-  browse:function(g){ return {mol:g, title:g.en, ltr:true, sub:g.he,
-                              tag:(CATS[g.cat]||{}).he, tagColor:(CATS[g.cat]||{}).color}; },
-  modes:dModes('fg', [{id:'s2n',glyph:'R–'},{id:'n2s',glyph:'Aa'},{id:'mix',glyph:'⇄'}]),
-  legend:Object.keys(CATS).map(function(k){ return {color:CATS[k].color, he:CATS[k].he}; }),
-  build:function(mode, n){
-    n = n || ROUND;
-    fgQuestion.pool = pickWeighted(GROUPS, n, function(g){return 'fg:'+g.id;});
-    const count = fgQuestion.pool.length;          /* shift מקצר את המאגר תוך כדי */
-    const out=[]; for(let i=0;i<count;i++) out.push(fgQuestion(mode));
-    return out;
-  }
-},
-{ id:'el', title:dLbl('el','title','יסודות'), sub:dLbl('el','sub',''), color:'var(--c-n)',
-  items:ELEMENTS, keyFn:function(e){return 'el:'+e.id;},
-  browse:function(e){ return {sym:e.sym, title:e.he, sub:e.en, body:e.role,
-                              tag:e.cat==='bulk'?'עיקרי':'קורט',
-                              tagColor:e.cat==='bulk'?'var(--c-n)':'var(--c-s)'}; },
-  modes:dModes('el', [{id:'sym',glyph:'Fe'},{id:'name',glyph:'שם'},{id:'class',glyph:'⊞'},{id:'mix',glyph:'⇄'}]),
-  legend:dLegend('el', {bulk:'var(--c-n)', trace:'var(--c-s)'}),
-  build:function(mode, n){
-    n = n || ROUND;
-    elQuestion.pool = pickWeighted(ELEMENTS, n, function(e){return 'el:'+e.id;});
-    const count = elQuestion.pool.length;          /* shift מקצר את המאגר תוך כדי */
-    const out=[]; for(let i=0;i<count;i++) out.push(elQuestion(mode));
-    return out;
-  }
-},
-{ id:'iso', title:dLbl('iso','title','איזומרים'), sub:dLbl('iso','sub',''), color:'var(--c-p)',
-  items:ISO_ALL, keyFn:function(n){return 'iso:'+n.id;},
-  browse:function(n){
-    const parent = n.parent ? (ISO.filter(function(x){return x.id===n.parent;})[0]||{}).he : '';
-    return {title:n.he, sub:n.en, body:n.def, note:n.ex, tag:parent, tagColor:n.color};
-  },
-  map:true,
-  modes:dModes('iso', [{id:'def',glyph:'?'},{id:'term',glyph:'≡'},{id:'tree',glyph:'⌂'},
-                       {id:'pair',glyph:'A|B'},{id:'mix',glyph:'⇄'}]),
-  legend:dLegend('iso', {structural:'var(--c-o)', stereo:'var(--c-n)',
-                         config:'var(--c-p)', sub:'var(--c-s)'}),
-  build:function(mode, n){
-    n = n || ROUND;
-    isoQuestion.pool = pickWeighted(ISO_ALL, n, function(x){return 'iso:'+x.id;});
-    isoQuestion.treePool = pickWeighted(ISO.filter(function(x){return x.parent;}), n, function(x){return 'iso:'+x.id;});
-    isoQuestion.pairPool = pickWeighted(ISO_PAIRS, ISO_PAIRS.length, function(p){return 'iso:'+p.id;});
-    const count = mode==='pair' ? Math.min(n, ISO_PAIRS.length) : n;
-    const out=[]; for(let i=0;i<count;i++) out.push(isoQuestion(mode));
-    return out;
-  }
-},
-];
-
 /* ===========================================================
-   חבילות נושא — כרטיסים גנריים, בלי קוד ייעודי לכל נושא.
-   כרטיס: {id, front, frontSub, back, note}
+   מנוע חבילות הנושא — כרטיס {id, front, frontSub, back, note}
    =========================================================== */
-const TOPICS = DATA.topics || [];
-const TOPIC_COLORS = ['var(--c-n)','var(--c-o)','var(--c-p)','var(--c-s)','var(--c-x)'];
-
-function topicQuestion(topic, mode){
+function topicQuestion(cards, key, mode){
   const card = topicQuestion.pool.shift();
-  const dir = mode==='mix' ? (Math.random()<0.5?'f2b':'b2f') : mode;
-  const foils = sample(topic.cards.filter(function(c){ return c.id!==card.id; }), 3);
+  const dir  = mode==='mix' ? (Math.random()<0.5?'f2b':'b2f') : mode;
+  const foils = sample(cards.filter(function(c){ return c.id!==card.id; }), 3);
   const opts = shuffle([card].concat(foils));
-  const key = 'tp:'+topic.id+':'+card.id;
+  const ckey = key(card);
 
   if(dir==='b2f'){
-    return { key:key, label:'לאיזה מושג זה שייך?',
+    return { key:ckey, label:'לאיזה מושג זה שייך?',
       prompt:{kind:'text', main:card.back},
       optionKind:'text',
       options:opts.map(function(o){ return {id:o.id, main:o.front, sub:o.frontSub||''}; }),
       answer:card.id, why:card.note||null };
   }
-  return { key:key, label:'מה זה?',
+  return { key:ckey, label:'מה זה?',
     prompt:{kind:'text', main:card.front, sub:card.frontSub||''},
     optionKind:'text',
     options:opts.map(function(o){ return {id:o.id, main:o.back}; }),
     answer:card.id, why:card.note||null };
 }
 
-/* חבילת נושא זקוקה לארבעה כרטיסים לפחות כדי לייצר ארבע אפשרויות */
-TOPICS.filter(function(t){ return t && Array.isArray(t.cards) && t.cards.length>=4; })
-  .forEach(function(t, i){
-    DECKS.push({
-      id:'tp-'+t.id, title:t.title, sub:t.sub || (t.cards.length+' כרטיסים'),
-      color:t.color || TOPIC_COLORS[i % TOPIC_COLORS.length],
-      items:t.cards, keyFn:function(c){ return 'tp:'+t.id+':'+c.id; },
-      browse:function(c){ return {title:c.front, sub:c.frontSub, body:c.back, note:c.note}; },
-      modes:[
-        {id:'f2b', glyph:'→', title:'מושג ← הסבר', desc:'רואה מושג, בוחר את ההסבר'},
-        {id:'b2f', glyph:'←', title:'הסבר ← מושג', desc:'רואה הסבר, בוחר את המושג'},
-        {id:'mix', glyph:'⇄', title:'מעורב', desc:'שני הכיוונים באקראי'},
-      ],
-      legend:[{color:t.color || TOPIC_COLORS[i % TOPIC_COLORS.length], he:t.title}],
+/* ===========================================================
+   בניית חבילות מרשומות תוכן. כל חבילה נושאת את הפריטים שלה,
+   כך שאותו מנוע שאלות משרת גם תוכן מקומי וגם תוכן מהשרת.
+   רשומה: {id, kind, title, subtitle, color, visibility, data, owner}
+   =========================================================== */
+const TOPIC_COLORS = ['var(--c-n)','var(--c-o)','var(--c-p)','var(--c-s)','var(--c-x)'];
+
+function makeDeck(row, idx){
+  const key = function(x){ return row.id + ':' + x.id; };
+
+  if(row.kind === 'groups'){
+    const items = row.data;
+    return { id:row.id, row:row, title:row.title, sub:row.subtitle||'', color:row.color||'var(--c-o)',
+      items:items, keyFn:key,
+      browse:function(g){ return {mol:g, title:g.en, ltr:true, sub:g.he,
+                                  tag:(CATS[g.cat]||{}).he, tagColor:(CATS[g.cat]||{}).color}; },
+      modes:dModes('fg', [{id:'s2n',glyph:'R–'},{id:'n2s',glyph:'Aa'},{id:'mix',glyph:'⇄'}]),
+      legend:Object.keys(CATS).map(function(k){ return {color:CATS[k].color, he:CATS[k].he}; }),
       build:function(mode, n){
-        const count = Math.min(n || ROUND, t.cards.length);
-        topicQuestion.pool = pickWeighted(t.cards, count, function(c){ return 'tp:'+t.id+':'+c.id; });
-        const out=[]; for(let k=0;k<count;k++) out.push(topicQuestion(t, mode));
+        fgQuestion.pool = pickWeighted(items, n || ROUND, key);
+        const count = fgQuestion.pool.length;      /* shift מקצר את המאגר תוך כדי */
+        const out=[]; for(let i=0;i<count;i++) out.push(fgQuestion(items, key, mode));
         return out;
+      } };
+  }
+
+  if(row.kind === 'elements'){
+    const items = row.data;
+    return { id:row.id, row:row, title:row.title, sub:row.subtitle||'', color:row.color||'var(--c-n)',
+      items:items, keyFn:key,
+      browse:function(e){ return {sym:e.sym, title:e.he, sub:e.en, body:e.role,
+                                  tag:e.cat==='bulk'?'עיקרי':'קורט',
+                                  tagColor:e.cat==='bulk'?'var(--c-n)':'var(--c-s)'}; },
+      modes:dModes('el', [{id:'sym',glyph:'Fe'},{id:'name',glyph:'שם'},{id:'class',glyph:'⊞'},{id:'mix',glyph:'⇄'}]),
+      legend:dLegend('el', {bulk:'var(--c-n)', trace:'var(--c-s)'}),
+      build:function(mode, n){
+        elQuestion.pool = pickWeighted(items, n || ROUND, key);
+        const count = elQuestion.pool.length;
+        const out=[]; for(let i=0;i<count;i++) out.push(elQuestion(items, key, mode));
+        return out;
+      } };
+  }
+
+  if(row.kind === 'iso'){
+    const D = {iso:row.data.iso||[], isoTerms:row.data.isoTerms||[], isoPairs:row.data.isoPairs||[]};
+    D.all = D.iso.concat(D.isoTerms);
+    return { id:row.id, row:row, title:row.title, sub:row.subtitle||'', color:row.color||'var(--c-p)',
+      items:D.all, keyFn:key, map:D.iso.length ? D : null,
+      browse:function(n){
+        const parent = n.parent ? (D.iso.filter(function(x){return x.id===n.parent;})[0]||{}).he : '';
+        return {title:n.he, sub:n.en, body:n.def, note:n.ex, tag:parent, tagColor:n.color};
       },
-    });
+      modes:dModes('iso', [{id:'def',glyph:'?'},{id:'term',glyph:'≡'},{id:'tree',glyph:'⌂'},
+                           {id:'pair',glyph:'A|B'},{id:'mix',glyph:'⇄'}]),
+      legend:dLegend('iso', {structural:'var(--c-o)', stereo:'var(--c-n)',
+                             config:'var(--c-p)', sub:'var(--c-s)'}),
+      build:function(mode, n){
+        n = n || ROUND;
+        isoQuestion.pool     = pickWeighted(D.all, n, key);
+        isoQuestion.treePool = pickWeighted(D.iso.filter(function(x){return x.parent;}), n, key);
+        isoQuestion.pairPool = pickWeighted(D.isoPairs, D.isoPairs.length, key);
+        const count = mode==='pair' ? Math.min(n, D.isoPairs.length) : n;
+        const out=[]; for(let i=0;i<count;i++) out.push(isoQuestion(D, key, mode));
+        return out;
+      } };
+  }
+
+  /* topic — המנוע הגנרי */
+  const cards = Array.isArray(row.data) ? row.data : (row.data.cards || []);
+  const color = row.color || TOPIC_COLORS[idx % TOPIC_COLORS.length];
+  return { id:row.id, row:row, title:row.title, sub:row.subtitle || (cards.length+' כרטיסים'),
+    color:color, items:cards, keyFn:key,
+    browse:function(c){ return {title:c.front, sub:c.frontSub, body:c.back, note:c.note}; },
+    modes:[
+      {id:'f2b', glyph:'→', title:'מושג ← הסבר', desc:'רואה מושג, בוחר את ההסבר'},
+      {id:'b2f', glyph:'←', title:'הסבר ← מושג', desc:'רואה הסבר, בוחר את המושג'},
+      {id:'mix', glyph:'⇄', title:'מעורב', desc:'שני הכיוונים באקראי'},
+    ],
+    legend:[{color:color, he:row.title}],
+    build:function(mode, n){
+      const count = Math.min(n || ROUND, cards.length);
+      topicQuestion.pool = pickWeighted(cards, count, key);
+      const out=[]; for(let k=0;k<count;k++) out.push(topicQuestion(cards, key, mode));
+      return out;
+    } };
+}
+
+/* חבילה צריכה ארבעה פריטים לפחות כדי לייצר ארבע אפשרויות */
+function buildDecks(rows){
+  return rows
+    .map(function(r, i){ return makeDeck(r, i); })
+    .filter(function(d){ return d.items && d.items.length >= 4; });
+}
+
+/* מקור התוכן. בשלב זה עדיין מהחבילה המוטמעת; ההחלפה למסד תבוא בנפרד. */
+function localRows(){
+  const rows = [
+    {id:'fg',  kind:'groups',   title:dLbl('fg','title','קבוצות פונקציונליות'),
+     subtitle:dLbl('fg','sub',''), color:'var(--c-o)', data:DATA.groups},
+    {id:'el',  kind:'elements', title:dLbl('el','title','יסודות'),
+     subtitle:dLbl('el','sub',''), color:'var(--c-n)', data:DATA.elements},
+    {id:'iso', kind:'iso',      title:dLbl('iso','title','איזומרים'),
+     subtitle:dLbl('iso','sub',''), color:'var(--c-p)',
+     data:{iso:DATA.iso, isoTerms:DATA.isoTerms, isoPairs:DATA.isoPairs}},
+  ];
+  (DATA.topics || []).forEach(function(t){
+    rows.push({id:'tp:'+t.id, kind:'topic', title:t.title, subtitle:t.sub,
+               color:t.color, data:t.cards});
   });
+  return rows;
+}
+
+let DECKS = buildDecks(localRows());
 
 function deckById(id){ return DECKS.filter(function(d){return d.id===id;})[0]; }
 
@@ -1470,6 +1508,9 @@ function renderResults(){
 }
 
 function renderMap(){
+  const deck = deckById(view.back) || {};
+  const D = deck.map || {iso:[], isoTerms:[]};
+  const ISO = D.iso, ISO_TERMS = D.isoTerms;
   function nodeHTML(n){
     return '<div class="node" style="--nc:'+n.color+'"><strong>'+esc(n.he)+'</strong>'+
       '<em>'+esc(n.def)+'</em>'+(n.ex?'<span class="ex">'+esc(n.ex)+'</span>':'')+'</div>';
