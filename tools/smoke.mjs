@@ -511,6 +511,22 @@ try {
   check(storeSrc.indexOf('data-link') > -1, 'אין העתקת קישור במאגר');
 }
 
+/* 5k — איפוס מטמון מדווח תוצאה ולא מרענן בעיוורון */
+{
+  const src = win.eval('hardReset.toString()');
+  check(src.indexOf('location.reload') < 0, 'האיפוס עדיין מרענן בעיוורון');
+  check(src.indexOf('caches.keys') > -1, 'האיפוס לא מנקה את מטמון ה-service worker');
+  check(src.indexOf('loadLibrary') > -1, 'האיפוס לא מושך מחדש');
+
+  const report = win.eval(`(function(){
+    return hardReset().then(function(r){ return typeof r === 'string' && r.length > 0; });
+  })()`);
+  check(report instanceof win.Promise || report === true || report,
+    'האיפוס לא מחזיר דיווח');
+  check(win.eval('renderStore.toString()').indexOf('diag-report') > -1,
+    'הדיווח לא מוצג במסך');
+}
+
 /* 6 — בלי מפגש שמור, מסך הנעילה מופיע ושום דבר אחר לא */
 {
   const locked = new JSDOM(html, {

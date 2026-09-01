@@ -449,6 +449,10 @@ h1{
 }
 .diag-acts button:hover{color:var(--accent);border-color:var(--accent)}
 .diag-acts button:disabled{opacity:.5}
+.diag-report{
+  margin-top:6px;border-radius:8px;padding:6px 9px;
+  background:var(--surface-2);color:var(--ink);font-size:11.5px;line-height:1.5;
+}
 .elist{display:flex;flex-direction:column;gap:8px}
 .erow{background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:10px 12px}
 .ehead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px}
@@ -2530,8 +2534,50 @@ function renderBrowse(){
    מאגר הנושאים — מה שלי, ומה שאחרים פרסמו. מינוי הוא חי:
    הבעלים מעדכן, וכל מי שרשום רואה מיד את הגרסה החדשה.
    =========================================================== */
+/* איפוס מלא: מטמון הנושאים, מטמון ה-service worker, ואז משיכה מחדש.
+   מדווח מה קרה במקום לרענן בעיוורון — רענון עיוור נראה בדיוק כמו
+   כפתור שלא עשה כלום. */
+function hardReset(){
+  const steps = [];
+  return Promise.resolve()
+    .then(function(){
+      try{ localStorage.removeItem(ROWS_KEY); steps.push('מטמון נושאים נמחק'); }
+      catch(e){ steps.push('מטמון נושאים: ' + e.message); }
+    })
+    .then(function(){
+      if(typeof caches === 'undefined' || !caches.keys) return null;
+      return caches.keys()
+        .then(function(keys){
+          return Promise.all(keys.map(function(k){ return caches.delete(k); }))
+            .then(function(){ if(keys.length) steps.push(keys.length + ' מטמוני גרסה נמחקו'); });
+        }).catch(function(){});
+    })
+    .then(function(){
+      if(!navigator.serviceWorker || !navigator.serviceWorker.getRegistration) return null;
+      return navigator.serviceWorker.getRegistration()
+        .then(function(r){ return r && r.update(); }).catch(function(){});
+    })
+    .then(function(){
+      LIB.status = 'unknown'; LIB.rows = []; LIB.reason = null;
+      return (AUTH && AUTH.uid) ? null : loadIdentity();
+    })
+    .then(loadLibrary)
+    .then(function(res){
+      steps.push(res && res.ok
+        ? 'התקבלו ' + res.data.length + ' נושאים מהשרת'
+        : 'המשיכה נכשלה' + (res && res.reason ? ' — ' + res.reason : ''));
+      return steps.join(' · ');
+    })
+    .catch(function(err){
+      steps.push('נכשל: ' + ((err && err.message) || 'שגיאה'));
+      return steps.join(' · ');
+    });
+}
+
 function openStore(highlight){
-  view = {name:'store', loading:true, mine:[], others:[], subs:[], highlight:highlight||null};
+  const report = view && view.resetReport;
+  view = {name:'store', loading:true, mine:[], others:[], subs:[],
+          highlight:highlight||null, resetReport:report||null};
   render();
   Promise.all([fetchMine(), fetchStore(), fetchSubs()]).then(function(r){
     r[2] = r[2] || [];
@@ -2618,6 +2664,7 @@ function renderStore(){
         (view.subs||[]).length+' מינויים</div>'+
       '<div>ספרייה: '+esc(LIB.status)+(LIB.reason ? ' ('+esc(LIB.reason)+')' : '')+
         ' · '+LIB.rows.length+' במטמון · '+DECKS.length+' מוצגים</div>'+
+      (view.resetReport ? '<div class="diag-report">'+esc(view.resetReport)+'</div>' : '')+
       '<div class="diag-acts">'+
         '<button id="reloadSrv">משוך מהשרת</button>'+
         '<button id="wipeCache">אפס מטמון מקומי</button>'+
@@ -2661,9 +2708,11 @@ function renderStore(){
   if(eb) eb.addEventListener('click', openErrors);
   const wc = app.querySelector('#wipeCache');
   if(wc) wc.addEventListener('click', function(){
-    try{ localStorage.removeItem(ROWS_KEY); }catch(e){}
-    LIB.status = 'unknown'; LIB.rows = []; LIB.reason = null;
-    location.reload();
+    wc.disabled = true; wc.textContent = 'מאפס…';
+    hardReset().then(function(report){
+      view.resetReport = report;
+      openStore();
+    });
   });
 
   Array.prototype.forEach.call(app.querySelectorAll('[data-link]'), function(b){
