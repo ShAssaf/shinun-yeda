@@ -573,6 +573,32 @@ try {
   check(src.indexOf('location.reload') < 0, 'הוספה עדיין מרעננת את הדף');
 }
 
+/* 5m — המאגר והמסך הראשי נשענים על אותה ספרייה */
+{
+  const src = win.eval('openStore.toString()');
+  check(src.indexOf('loadLibrary()') > -1, 'המאגר שואל את השרת בנפרד מהמסך הראשי');
+  check(src.indexOf('fetchMine()') < 0, 'המאגר עדיין מושך רשימה נפרדת');
+  check(src.indexOf('LIB.rows.filter') > -1, 'המאגר לא נגזר מהספרייה');
+
+  /* נושא בבעלותי שנמצא בספרייה חייב להופיע גם במסך הראשי */
+  const both = JSON.parse(win.eval(`(function(){
+    const save = LIB.rows.slice(), savedAuth = AUTH;
+    AUTH = Object.assign({}, AUTH || {}, {uid:'owner-1'});
+    LIB.status = 'ok';
+    LIB.rows = save.concat([{id:'new-1', kind:'topic', title:'מעגל קרבס', subtitle:'',
+      color:null, visibility:'private', owner_id:'owner-1', item_count:15,
+      data:[{id:'a',front:'א',back:'1'},{id:'b',front:'ב',back:'2'},
+            {id:'c',front:'ג',back:'3'},{id:'d',front:'ד',back:'4'}]}]);
+    applyRows(); renderNow();
+    const onHome = DECKS.filter(function(d){ return d.id === 'new-1'; }).length;
+    const mine = LIB.rows.filter(function(d){ return d.owner_id === AUTH.uid; }).length;
+    LIB.rows = save; AUTH = savedAuth; applyRows(); renderNow();
+    return JSON.stringify({onHome:onHome, mine:mine});
+  })()`));
+  check(both.onHome === 1, 'נושא בבעלותי לא הופיע במסך הראשי');
+  check(both.mine === 1, 'נושא בבעלותי לא זוהה כשלי');
+}
+
 /* 6 — בלי מפגש שמור, מסך הנעילה מופיע ושום דבר אחר לא */
 {
   const locked = new JSDOM(html, {

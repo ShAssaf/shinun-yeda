@@ -2618,12 +2618,17 @@ function openStore(highlight){
   view = {name:'store', loading:true, mine:[], others:[], subs:[],
           highlight:highlight||null, resetReport:report||null};
   render();
-  Promise.all([fetchMine(), fetchStore(), fetchSubs()]).then(function(r){
+  /* הספרייה נמשכת דרך אותו מסלול כמו המסך הראשי, כדי ששני המסכים
+     לא יוכלו להציג מצבים שונים. קודם המאגר שאל בנפרד, ולכן נושא
+     שנוצר הופיע כאן ולא שם. */
+  Promise.all([loadLibrary(), fetchStore(), fetchSubs()]).then(function(r){
     r[2] = r[2] || [];
-    const mineIds = r[0].map(function(d){ return d.id; });
-    view.mine   = r[0];
+    const uid = AUTH && AUTH.uid;
+    view.mine   = LIB.rows.filter(function(d){ return d.owner_id === uid; });
+    const mineIds = view.mine.map(function(d){ return d.id; });
     view.others = r[1].filter(function(d){ return mineIds.indexOf(d.id) < 0; });
     view.subs   = r[2];
+    view.libError = LIB.status !== 'ok' ? (LIB.reason || 'לא הצלחתי לרענן') : null;
     view.loading = false;
     /* נושא שהגיע מקישור מוצג ראשון, גם אם עוד לא נרשמתי אליו */
     if(view.highlight){
@@ -2673,6 +2678,10 @@ function renderStore(){
   '<div class="store-wrap">'+
     (view.loading ? '<p class="note">טוען…</p>' : '')+
     (view.err ? '<p class="note">'+esc(view.err)+'</p>' : '')+
+    (view.libError
+      ? '<div class="lib-warn">הרשימה מהמטמון — '+esc(view.libError)+
+          '<button id="storeRetry">נסה שוב</button></div>'
+      : '')+
     (dups.length
       ? '<div class="panel share"><div class="share-row">'+
           '<div><strong>נמצאו '+dups.length+' כפילויות</strong>'+
@@ -2745,6 +2754,11 @@ function renderStore(){
     });
   });
 
+  const sr = app.querySelector('#storeRetry');
+  if(sr) sr.addEventListener('click', function(){
+    sr.disabled = true; sr.textContent = 'טוען…';
+    (AUTH && AUTH.uid ? Promise.resolve() : loadIdentity()).then(function(){ openStore(); });
+  });
   const rl = app.querySelector('#reloadSrv');
   if(rl) rl.addEventListener('click', function(){
     rl.disabled = true; rl.textContent = 'מושך…';
