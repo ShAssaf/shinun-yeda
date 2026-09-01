@@ -414,6 +414,7 @@ h1{
 
 /* ---------- מאגר הנושאים ---------- */
 .store-wrap{flex:1;display:flex;flex-direction:column;gap:14px;padding:4px 0 10px}
+.sec-note{font-size:12px;color:var(--ink-2);line-height:1.55;margin:0 0 9px}
 .store-sec h3{
   font-family:"IBM Plex Sans",sans-serif;font-size:11px;font-weight:600;
   letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2);margin:0 0 8px;
@@ -1811,7 +1812,6 @@ function mineDeck(d){
 
 function renderDeck(){
   const d = deckById(view.deck);
-  const pub = !!(d.row && d.row.visibility === 'public');
   const m = masteredCount(d.items, d.keyFn);
   const due = dueCount(d.items, d.keyFn);
   const modes = d.modes.map(function(mo){
@@ -1841,18 +1841,7 @@ function renderDeck(){
       '<button class="link-btn" id="browseBtn">'+icon('book')+' עיון — כל הכרטיסים גלויים</button>'+
       (d.map ? '<button class="link-btn" id="mapBtn">מפת האיזומרים</button>' : '')+
     '</div>'+
-    (mineDeck(d)
-      ? '<div class="panel share">'+
-          '<div class="share-row">'+
-            '<div><strong>'+(pub?'נושא ציבורי':'נושא פרטי')+'</strong>'+
-            '<span>'+(pub
-              ? 'כל מי שמחובר יכול למצוא אותו במאגר ולהוסיף לעצמו.'
-              : 'רק אתה רואה אותו.')+'</span></div>'+
-            '<button class="act'+(pub?' on':'')+'" id="pubBtn">'+(pub?'הפוך לפרטי':'פרסם')+'</button>'+
-          '</div>'+
-          (pub ? '<button class="link-btn" id="linkBtn">העתק קישור לנושא</button>' : '')+
-        '</div>'
-      : '')+
+
   '</div>';
 
   app.querySelector('#homeBtn').addEventListener('click', function(){ view={name:'home'}; render(); });
@@ -1862,26 +1851,6 @@ function renderDeck(){
     view={name:'browse', deck:d.id, q:'', hide:false}; render();
   });
 
-  const pb = app.querySelector('#pubBtn');
-  if(pb) pb.addEventListener('click', function(){
-    pb.disabled = true;
-    setVisibility(d.row.id, pub ? 'private' : 'public').then(function(r){
-      if(!r.ok) throw new Error('failed');
-      d.row.visibility = pub ? 'private' : 'public';
-      jwrite(ROWS_KEY, LIB.rows);
-      render();
-    }).catch(function(){ pb.disabled = false; });
-  });
-
-  const lb2 = app.querySelector('#linkBtn');
-  if(lb2) lb2.addEventListener('click', function(){
-    const url = location.origin + location.pathname + '?deck=' + d.row.id;
-    const done = function(){ lb2.textContent = 'הקישור הועתק'; setTimeout(function(){
-      lb2.textContent = 'העתק קישור לנושא'; }, 1800); };
-    if(navigator.clipboard && navigator.clipboard.writeText){
-      navigator.clipboard.writeText(url).then(done).catch(function(){ prompt('הקישור:', url); });
-    } else prompt('הקישור:', url);
-  });
   Array.prototype.forEach.call(app.querySelectorAll('.mode'), function(btn){
     btn.addEventListener('click', function(){ startQuiz(d.id, btn.dataset.mode); });
   });
@@ -2593,7 +2562,8 @@ function renderStore(){
       '</strong>'+
       '<span>'+count+' כרטיסים'+(d.subtitle ? ' · '+esc(d.subtitle) : '')+'</span></div>'+
       (mine
-        ? '<button class="act'+(pub?' on':'')+'" data-pub="'+d.id+'" data-to="'+(pub?'private':'public')+'">'+
+        ? (pub ? '<button class="act" data-link="'+d.id+'" aria-label="העתק קישור">קישור</button>' : '')+
+          '<button class="act'+(pub?' on':'')+'" data-pub="'+d.id+'" data-to="'+(pub?'private':'public')+'">'+
             (pub?'הפוך לפרטי':'פרסם')+'</button>'+
           '<button class="act danger" data-del="'+d.id+'" aria-label="מחק">✕</button>'
         : '<button class="act'+(isSub(d.id)?' on danger':'')+'" data-sub="'+d.id+'">'+
@@ -2619,7 +2589,10 @@ function renderStore(){
           '<button class="act danger" id="dedupBtn">נקה</button>'+
         '</div></div>'
       : '')+
-    (mine.length ? '<div class="store-sec"><h3>הנושאים שלי</h3>'+
+    (mine.length
+      ? '<div class="store-sec"><h3>הנושאים שלי — פרסום ושיתוף</h3>'+
+        '<p class="sec-note">פרסום הופך נושא לגלוי לכל מי שמחובר, והם יוכלו להוסיף אותו לעצמם. '+
+          'העריכה נשארת אצלך, וכל שינוי מגיע אליהם מיד.</p>'+
        mine.map(function(d){ return card(d, true); }).join('')+'</div>' : '')+
     '<div class="store-sec"><h3>פורסמו על ידי אחרים</h3>'+
       (others.length
@@ -2691,6 +2664,19 @@ function renderStore(){
     try{ localStorage.removeItem(ROWS_KEY); }catch(e){}
     LIB.status = 'unknown'; LIB.rows = []; LIB.reason = null;
     location.reload();
+  });
+
+  Array.prototype.forEach.call(app.querySelectorAll('[data-link]'), function(b){
+    b.addEventListener('click', function(){
+      const url = location.origin + location.pathname + '?deck=' + b.dataset.link;
+      const done = function(){
+        b.textContent = 'הועתק';
+        setTimeout(function(){ b.textContent = 'קישור'; }, 1800);
+      };
+      if(navigator.clipboard && navigator.clipboard.writeText)
+        navigator.clipboard.writeText(url).then(done).catch(function(){ prompt('הקישור:', url); });
+      else prompt('הקישור:', url);
+    });
   });
 
   Array.prototype.forEach.call(app.querySelectorAll('[data-del]'), function(b){

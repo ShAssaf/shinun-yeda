@@ -214,7 +214,10 @@ try {
   })()`);
   const cards = document.querySelectorAll('.scard').length;
   check(cards === 4, `החנות הציגה ${cards} חבילות במקום 4`);
-  check(document.querySelectorAll('[data-pub]').length === 2, 'אין כפתורי פרסום לחבילות שלי');
+  check(document.querySelectorAll('[data-pub]').length === 2, 'אין כפתורי פרסום לנושאים שלי');
+  check(document.querySelectorAll('[data-del]').length === 2, 'אין כפתורי מחיקה לנושאים שלי');
+  /* קישור מוצע רק לנושא שכבר פורסם */
+  check(document.querySelectorAll('[data-link]').length === 1, 'קישור מוצע לנושא שאינו ציבורי');
   check(document.querySelectorAll('[data-sub]').length === 2, 'אין כפתורי מינוי לחבילות של אחרים');
   /* חבילה שאני רשום אליה מוצגת כ"הסר", ואחת שלא — כ"הוסף" */
   const subBtns = Array.from(document.querySelectorAll('[data-sub]'));
@@ -496,6 +499,16 @@ try {
     return JSON.stringify(bad.slice(0, 5));
   })()`));
   check(built.length === 0, 'טקסט ריק ל«למה»: ' + JSON.stringify(built));
+}
+
+/* 5j — פרסום חי רק במאגר, לא במסך הנושא */
+{
+  const deckSrc = win.eval('renderDeck.toString()');
+  check(deckSrc.indexOf('pubBtn') < 0, 'כפתור פרסום נשאר במסך הנושא');
+  check(deckSrc.indexOf('linkBtn') < 0, 'העתקת קישור נשארה במסך הנושא');
+  const storeSrc = win.eval('renderStore.toString()');
+  check(storeSrc.indexOf('data-pub') > -1, 'אין פרסום במאגר');
+  check(storeSrc.indexOf('data-link') > -1, 'אין העתקת קישור במאגר');
 }
 
 /* 6 — בלי מפגש שמור, מסך הנעילה מופיע ושום דבר אחר לא */
