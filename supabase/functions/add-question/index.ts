@@ -173,7 +173,15 @@ async function gh(path: string, token: string, init?: RequestInit) {
       ...(init?.headers ?? {}),
     },
   });
-  if (!res.ok) throw new Error(`GitHub ${init?.method ?? 'GET'} ${path}: ${res.status} ${await res.text()}`);
+  if (!res.ok) {
+    const detail = await res.text();
+    if (res.status === 401)
+      throw new Error('GITHUB_TOKEN אינו תקף. צור טוקן חדש והגדר אותו מחדש ב-supabase secrets.');
+    if (res.status === 403 || res.status === 404)
+      throw new Error(`ל-GITHUB_TOKEN אין הרשאת Contents: Read and write על ${Deno.env.get('GITHUB_REPO')?.trim()}, `
+        + 'או ש-GITHUB_REPO שגוי.');
+    throw new Error(`GitHub ${init?.method ?? 'GET'} ${path}: ${res.status} ${detail.slice(0, 200)}`);
+  }
   return res.json();
 }
 
@@ -183,12 +191,14 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return json({ error: 'POST בלבד' }, 405);
 
+  /* trim — ערך שהודבק עם רווח או שורה חדשה נגררת שובר את האימות מול GitHub */
+  const envRaw = (k: string) => Deno.env.get(k)?.trim();
   const env = {
-    key: Deno.env.get('ANTHROPIC_API_KEY'),
-    token: Deno.env.get('GITHUB_TOKEN'),
-    repo: Deno.env.get('GITHUB_REPO'),
-    pass: Deno.env.get('APP_PASSPHRASE'),
-    model: Deno.env.get('MODEL') ?? 'claude-opus-5',
+    key: envRaw('ANTHROPIC_API_KEY'),
+    token: envRaw('GITHUB_TOKEN'),
+    repo: envRaw('GITHUB_REPO'),
+    pass: envRaw('APP_PASSPHRASE'),
+    model: envRaw('MODEL') ?? 'claude-opus-5',
   };
   for (const [k, v] of Object.entries(env)) {
     if (!v) return json({ error: `חסר משתנה סביבה: ${k}` }, 500);
