@@ -232,8 +232,19 @@ Deno.serve(async (req) => {
   try {
     /* התוכן הנוכחי — גם כהקשר ל-Claude וגם לצורך ה-sha של ה-commit */
     const file = await gh(`/repos/${env.repo}/contents/data/decks.json`, env.token!) as
-      { content: string; sha: string };
-    const current = JSON.parse(new TextDecoder().decode(decodeBase64(file.content)));
+      { content: string; sha: string; encoding: string; download_url: string };
+
+    /* GitHub עוטף את ה-base64 בשורות חדשות, ו-decodeBase64 דוחה רווחים.
+       לקבצים גדולים מ-1MB הוא מחזיר encoding "none" וצריך למשוך את הגולמי. */
+    let raw: string;
+    if (file.encoding === 'base64' && file.content) {
+      raw = new TextDecoder().decode(decodeBase64(file.content.replace(/\s+/g, '')));
+    } else {
+      const r = await fetch(file.download_url);
+      if (!r.ok) throw new Error('לא הצלחתי למשוך את data/decks.json');
+      raw = await r.text();
+    }
+    const current = JSON.parse(raw);
 
     /* מזהים קיימים — מונע התנגשויות וכפילויות */
     const existing: Record<string, string[]> = {};
