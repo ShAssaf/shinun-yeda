@@ -12,7 +12,8 @@ const TEMPLATE = join(ROOT, 'src', 'app.html');
 const DATA = join(ROOT, 'data', 'decks.json');
 const CONFIG = join(ROOT, 'data', 'config.json');
 
-const PWA_HEAD = `<link rel="manifest" href="manifest.webmanifest">
+const PWA_HEAD = `<meta name="app-build" content="__BUILD__">
+<link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 `;
@@ -62,6 +63,9 @@ if (offlineFonts) {
              '<link rel="stylesheet" href="fonts.css">');
 }
 pwa = pwa.replace(/(<\/title>\n)/, '$1' + PWA_HEAD) + PWA_TAIL;
+/* חתימת הבנייה נכנסת לדף כדי שכל תקלה ביומן תסגיר מאיזו גרסה הגיעה */
+const build = createHash('sha256').update(withData).digest('hex').slice(0, 12);
+pwa = pwa.replace('__BUILD__', build);
 await mkdir(join(ROOT, 'www'), { recursive: true });
 await writeFile(join(ROOT, 'www', 'index.html'), pwa, 'utf8');
 

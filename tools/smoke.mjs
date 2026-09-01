@@ -326,6 +326,54 @@ try {
   check(keysets.length >= 3, `המטען הכיל ${keysets.length} שורות בלבד`);
 }
 
+/* 5f — יומן התקלות: לכידה, דחיית כפילויות, ומסך האדמין */
+{
+  const r = JSON.parse(win.eval(`(function(){
+    try{ localStorage.removeItem('shinun-errq'); }catch(e){}
+    ERRQ = [];
+    logError('client', 'בדיקה אחת', {a:1});
+    logError('client', 'בדיקה אחת', {a:1});   /* כפילות בטווח דקה */
+    logError('fetch',  'בדיקה שנייה', null);
+    logError('client', '');                    /* ריק — לא נרשם */
+    return JSON.stringify({
+      n: ERRQ.length,
+      kinds: ERRQ.map(function(x){ return x.kind; }),
+      hasScreen: !!(ERRQ[0] && ERRQ[0].context && 'screen' in ERRQ[0].context),
+      hasUa: !!(ERRQ[0] && ERRQ[0].user_agent)
+    });
+  })()`));
+  check(r.n === 2, `נרשמו ${r.n} תקלות במקום 2 (כפילות או ריק לא נחסמו)`);
+  check(r.kinds.join(',') === 'client,fetch', 'סוגי התקלות לא נשמרו');
+  check(r.hasScreen, 'לא נשמר המסך שבו קרתה התקלה');
+  check(r.hasUa, 'לא נשמר הדפדפן');
+
+  /* דיווח שנכשל לא מייצר תקלה נוספת — אחרת נוצרת לולאה */
+  const noLoop = JSON.parse(win.eval(`(function(){
+    ERRQ = [];
+    logging = true;
+    logError('client', 'לא אמור להירשם');
+    logging = false;
+    return JSON.stringify({n: ERRQ.length});
+  })()`));
+  check(noLoop.n === 0, 'לכידה בזמן דיווח יוצרת לולאה');
+
+  try {
+    win.eval(`(function(){
+      quiz = null;
+      view = {name:'errors', loading:false, filter:'', rows:[
+        {id:1, at:'2026-09-01T10:00:00Z', kind:'fetch', message:'GET decks → 401', context:{status:401}},
+        {id:2, at:'2026-09-01T10:05:00Z', kind:'client', message:'x is not defined', context:{line:12}}
+      ]};
+      render();
+    })()`);
+    check(document.querySelectorAll('.erow').length === 2, 'מסך היומן לא הציג את השורות');
+    win.eval(`(function(){ view.filter='401'; render(); })()`);
+    check(document.querySelectorAll('.erow').length === 1, 'הסינון ביומן לא סינן');
+  } catch (e) {
+    fail.push('מסך היומן נפל: ' + e.message);
+  }
+}
+
 /* 6 — בלי מפגש שמור, מסך הנעילה מופיע ושום דבר אחר לא */
 {
   const locked = new JSDOM(html, {

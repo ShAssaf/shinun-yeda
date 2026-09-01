@@ -432,6 +432,22 @@ h1{
 }
 .diag-acts button:hover{color:var(--accent);border-color:var(--accent)}
 .diag-acts button:disabled{opacity:.5}
+.elist{display:flex;flex-direction:column;gap:8px}
+.erow{background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:10px 12px}
+.ehead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px}
+.ekind{
+  font-family:"IBM Plex Sans",sans-serif;font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  border:1px solid var(--line-2);border-radius:99px;padding:1px 8px;color:var(--ink-2);
+}
+.ekind.k-fetch{color:var(--c-o);border-color:var(--c-o)}
+.ekind.k-function{color:var(--c-n);border-color:var(--c-n)}
+.ekind.k-client,.ekind.k-promise{color:var(--bad);border-color:var(--bad)}
+.ewhen{font-family:"IBM Plex Sans",sans-serif;font-size:11px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.emsg{font-size:13.5px;line-height:1.45;word-break:break-word}
+.ectx{
+  font-family:"IBM Plex Sans",sans-serif;font-size:11px;color:var(--ink-2);
+  margin-top:5px;word-break:break-all;line-height:1.45;
+}
 .panel.share{padding:13px 14px;display:flex;flex-direction:column;gap:10px}
 .share-row{display:flex;align-items:center;gap:12px}
 .share-row > div{flex:1;min-width:0}
@@ -1125,6 +1141,81 @@ function topicQuestion(cards, key, mode){
 }
 
 /* ===========================================================
+   יומן תקלות. כל כישלון שהיה נבלע בשקט נרשם — מקומית מיד, ולשרת
+   כשיש חיבור. אדמין קורא את הכול, משתמש רגיל רק את שלו (RLS).
+   =========================================================== */
+const ERRQ_KEY = 'shinun-errq';
+const ERR_APP  = (document.querySelector('meta[name="app-build"]') || {}).content || 'dev';
+let ERRQ = jread(ERRQ_KEY, []);
+let logging = false;              /* מונע לולאה: כישלון בדיווח לא מדווח */
+const recent = {};                /* דחיית כפילויות בטווח דקה */
+
+function logError(kind, message, context){
+  if(logging) return;
+  const msg = String(message || '').slice(0, 500);
+  if(!msg) return;
+  const sig = kind + '|' + msg;
+  const now = Date.now();
+  if(recent[sig] && now - recent[sig] < 60000) return;
+  recent[sig] = now;
+
+  const row = {
+    kind: kind,
+    message: msg,
+    context: Object.assign({screen: view && view.name, url: location.pathname}, context || {}),
+    user_agent: navigator.userAgent.slice(0, 300),
+    app: ERR_APP
+  };
+  ERRQ.push(row);
+  if(ERRQ.length > 100) ERRQ = ERRQ.slice(-100);   /* לא נותנים לתור לתפוח */
+  jwrite(ERRQ_KEY, ERRQ);
+  flushErrors();
+}
+
+function checkAdmin(){
+  if(!canSync() || !AUTH.uid) return Promise.resolve(false);
+  return rest('rpc/is_admin', {method:'POST', headers:restHeaders(), body:'{}'})
+    .then(function(r){ return r.ok ? r.json() : false; })
+    .then(function(v){
+      const was = AUTH.admin;
+      AUTH.admin = !!v; authWrite(AUTH);
+      if(was !== AUTH.admin) render();
+      return AUTH.admin;
+    }).catch(function(){ return false; });
+}
+
+function flushErrors(){
+  if(logging || !ERRQ.length || !canSync() || !AUTH.uid) return Promise.resolve();
+  logging = true;
+  const batch = ERRQ.slice(0, 20).map(function(r){
+    return Object.assign({user_id: AUTH.uid}, r);
+  });
+  return rest('error_log', {
+    method:'POST',
+    headers: Object.assign(restHeaders(), {Prefer:'return=minimal'}),
+    body: JSON.stringify(batch)
+  }).then(function(r){
+    if(r.ok){ ERRQ = ERRQ.slice(batch.length); jwrite(ERRQ_KEY, ERRQ); }
+  }).catch(function(){}).then(function(){ logging = false; });
+}
+
+addEventListener('error', function(e){
+  logError('client', e.message, {file:(e.filename||'').split('/').pop(), line:e.lineno});
+});
+addEventListener('unhandledrejection', function(e){
+  const r = e.reason;
+  logError('promise', (r && r.message) || String(r), null);
+});
+
+/* קריאת רשת שנכשלה — המקום שבו כל הבאגים של היום התחבאו */
+function logFetch(where, res, extra){
+  if(res && res.ok) return res;
+  const status = res ? res.status : 0;
+  logError('fetch', where + ' → ' + status, Object.assign({status:status}, extra||{}));
+  return res;
+}
+
+/* ===========================================================
    ספריית התוכן — מקור האמת ב-Postgres, מראה מקומי לאופליין.
    "הספרייה שלי" = החבילות שאני רשום אליהן. חבילה ציבורית נראית
    לכל מחובר; פרטית רק לבעלים. שתי המדיניות נאכפות ב-RLS.
@@ -1134,8 +1225,14 @@ let ROWS = jread(ROWS_KEY, null);        /* null = עוד לא נמשך מהשר
 let pendingShare = null;                 /* נושא שהגיע בקישור לפני התחברות */
 
 function rest(path, init){
+  const where = (init && init.method ? init.method : 'GET') + ' ' + path.split('?')[0];
   return fetch(CFG.supabaseUrl + '/rest/v1/' + path,
-    Object.assign({headers: restHeaders()}, init || {}));
+    Object.assign({headers: restHeaders()}, init || {}))
+    .then(function(r){ return logFetch(where, r); })
+    .catch(function(err){
+      logError('fetch', where + ' → ' + (err && err.message ? err.message : 'נכשל'), null);
+      throw err;
+    });
 }
 
 /* הספרייה = הנושאים שבבעלותי ∪ אלה שנרשמתי אליהם.
@@ -1305,7 +1402,9 @@ function importStarter(){
     });
     });
   }).catch(function(err){
-    return {ok:false, error:'נכשל: ' + (err && err.message ? err.message : 'שגיאה לא ידועה')};
+    const msg = (err && err.message) ? err.message : 'שגיאה לא ידועה';
+    logError('function', 'importStarter → ' + msg, null);
+    return {ok:false, error:'נכשל: ' + msg};
   });
 }
 
@@ -1981,7 +2080,7 @@ function loadIdentity(){
         AUTH.email = u.email; AUTH.uid = u.id; authWrite(AUTH); render();
         verifyAccess(true).then(function(){
           if(AUTH){
-            pullCards(); flushQueue();
+            pullCards(); flushQueue(); flushErrors(); checkAdmin();
             loadLibrary().then(function(){
               if(pendingShare){ const id = pendingShare; pendingShare = null; openStore(id); }
             });
@@ -2148,6 +2247,7 @@ function openAddSheet(){
     callFn(CFG.addQuestionUrl,
       { request:body, deck:bg.querySelector('#addDeck').value, images:shots }
     ).then(function(res){
+      if(!res.ok) logError('function', 'add-question → ' + res.status + ' ' + (res.body.error||''), null);
       if(res.status===401){ say('bad', res.body.error || 'ההתחברות נדחתה.'); send.disabled=false; return; }
       if(!res.ok){ say('bad', res.body.error || ('השרת החזיר '+res.status)); send.disabled=false; return; }
       say('ok', (res.body.summary || 'נוסף.') + ' האתר נבנה מחדש — רענן בעוד כדקה.');
@@ -2193,6 +2293,7 @@ function renderLab(){
     render();
     callFn(CFG.editAppUrl, payload).then(function(res){
       view.busy = false;
+      if(!res.ok) logError('function', 'edit-app → ' + res.status + ' ' + (res.body.error||''), null);
       if(res.status===401){ view.msg = res.body.error || 'ההתחברות נדחתה.'; view.cls='bad'; }
       else if(!res.ok){ view.msg = res.body.error || ('השרת החזיר '+res.status); view.cls='bad'; }
       else{
@@ -2402,6 +2503,7 @@ function renderStore(){
       '<div class="diag-acts">'+
         '<button id="reloadSrv">משוך מהשרת</button>'+
         '<button id="wipeCache">אפס מטמון מקומי</button>'+
+        ((AUTH && AUTH.admin) ? '<button id="errBtn">יומן תקלות</button>' : '')+
       '</div>'+
     '</div>'+
   '</div>';
@@ -2437,6 +2539,8 @@ function renderStore(){
     (AUTH && AUTH.uid ? Promise.resolve() : loadIdentity())
       .then(loadLibrary).then(function(){ openStore(); });
   });
+  const eb = app.querySelector('#errBtn');
+  if(eb) eb.addEventListener('click', openErrors);
   const wc = app.querySelector('#wipeCache');
   if(wc) wc.addEventListener('click', function(){
     try{ localStorage.removeItem(ROWS_KEY); }catch(e){}
@@ -2625,6 +2729,73 @@ function renderStats(){
   });
 }
 
+/* ===========================================================
+   יומן התקלות — מסך אדמין. RLS כבר מגביל את הקריאה, אז אין כאן
+   בדיקת הרשאה שנייה; הכפתור פשוט לא מוצג למי שאינו אדמין.
+   =========================================================== */
+function openErrors(){
+  view = {name:'errors', loading:true, rows:[], filter:''};
+  render();
+  rest('error_log?select=id,at,kind,message,context,user_id,app&order=at.desc&limit=100')
+    .then(function(r){ return r.ok ? r.json() : []; })
+    .then(function(rows){ view.rows = rows || []; view.loading = false; render(); })
+    .catch(function(){ view.loading = false; view.err = 'לא הצלחתי לטעון.'; render(); });
+}
+
+function renderErrors(){
+  const f = (view.filter || '').toLowerCase();
+  const rows = (view.rows || []).filter(function(r){
+    if(!f) return true;
+    return (r.kind + ' ' + r.message + ' ' + JSON.stringify(r.context || {}))
+      .toLowerCase().indexOf(f) > -1;
+  });
+
+  const list = rows.map(function(r){
+    const t = new Date(r.at);
+    const when = t.toLocaleDateString('he-IL') + ' ' +
+                 t.toLocaleTimeString('he-IL', {hour:'2-digit', minute:'2-digit'});
+    const ctx = r.context ? JSON.stringify(r.context) : '';
+    return '<div class="erow">'+
+      '<div class="ehead"><span class="ekind k-'+esc(r.kind)+'">'+esc(r.kind)+'</span>'+
+        '<span class="ewhen" dir="ltr">'+esc(when)+'</span></div>'+
+      '<div class="emsg" dir="ltr">'+esc(r.message)+'</div>'+
+      (ctx ? '<div class="ectx" dir="ltr">'+esc(ctx.slice(0,300))+'</div>' : '')+
+    '</div>';
+  }).join('');
+
+  app.innerHTML =
+  '<div class="bar">'+
+    '<button class="icon-btn" id="backBtn" aria-label="חזרה">'+icon('arrow')+'</button>'+
+    '<div class="title">יומן תקלות</div>'+
+    '<div class="count">'+rows.length+'</div>'+
+  '</div>'+
+  '<div class="browse-wrap">'+
+    '<div class="browse-bar">'+
+      '<input id="eq" type="search" placeholder="סינון" value="'+esc(view.filter||'')+'">'+
+      '<button id="eclear">מחק הכול</button>'+
+    '</div>'+
+    (view.loading ? '<p class="note">טוען…</p>' : '')+
+    (view.err ? '<p class="note">'+esc(view.err)+'</p>' : '')+
+    (!view.loading && !rows.length ? '<p class="note">אין תקלות. זה או שקט או שהלכידה לא עובדת.</p>' : '')+
+    '<div class="elist">'+list+'</div>'+
+  '</div>';
+
+  app.querySelector('#backBtn').addEventListener('click', function(){ view={name:'home'}; render(); });
+  const inp = app.querySelector('#eq');
+  inp.addEventListener('input', function(){
+    view.filter = inp.value;
+    const at = inp.selectionStart;
+    render();
+    const again = app.querySelector('#eq');
+    again.focus(); again.setSelectionRange(at, at);
+  });
+  app.querySelector('#eclear').addEventListener('click', function(){
+    if(!confirm('למחוק את כל היומן?')) return;
+    rest('error_log?id=gt.0', {method:'DELETE', headers:restHeaders()})
+      .then(function(){ openErrors(); });
+  });
+}
+
 function render(){
   if(authEnabled && !AUTH){ renderLock(); window.scrollTo(0,0); return; }
   if(quiz && quiz.done) renderResults();
@@ -2635,6 +2806,7 @@ function render(){
   else if(view.name==='browse') renderBrowse();
   else if(view.name==='store') renderStore();
   else if(view.name==='stats') renderStats();
+  else if(view.name==='errors') renderErrors();
   else renderHome();
   window.scrollTo(0,0);
 }
@@ -2653,7 +2825,9 @@ if(canSync()){
   pullCards();
   flushQueue();
   /* קודם זהות — הספרייה והבעלות תלויות ב-uid */
-  (authEnabled ? loadIdentity() : Promise.resolve()).then(loadLibrary);
+  (authEnabled ? loadIdentity() : Promise.resolve())
+    .then(function(){ flushErrors(); checkAdmin(); })
+    .then(loadLibrary);
 } else if(authEnabled) {
   loadIdentity();
 }
