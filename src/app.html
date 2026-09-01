@@ -1494,7 +1494,8 @@ function renderHome(){
       '<div class="stat"><b>'+(store.rounds||0)+'</b><span>סבבים</span></div>'+
     '</button>'+
     (!DECKS.length
-      ? '<p class="note">אין עדיין נושאים בספרייה שלך. פתח את מאגר הנושאים כדי להוסיף.</p>'
+      ? '<p class="note">אין עדיין נושאים בספרייה שלך.</p>'+
+        (canSync() ? '<button class="btn primary go" id="seedHome">ייבא את ערכת הפתיחה</button>' : '')
       : totalDue
         ? '<button class="btn primary go" id="goBtn">חזרה עכשיו · '+
             Math.min(totalDue, ROUND)+' כרטיסים</button>'
@@ -1535,6 +1536,14 @@ function renderHome(){
   app.querySelector('#examBtn').addEventListener('click', openExamSheet);
   const sb = app.querySelector('#storeBtn');
   if(sb) sb.addEventListener('click', function(){ openStore(); });
+  const sh = app.querySelector('#seedHome');
+  if(sh) sh.addEventListener('click', function(){
+    sh.disabled = true; sh.textContent = 'מייבא…';
+    importStarter().then(function(ok){
+      if(!ok){ sh.disabled = false; sh.textContent = 'הייבוא נכשל — נסה שוב'; return; }
+      loadLibrary();
+    });
+  });
   app.querySelector('#statsBtn').addEventListener('click', function(){
     view={name:'stats'}; loadStats();
   });
@@ -1874,7 +1883,8 @@ function verifyAccess(force){
 }
 
 function loadIdentity(){
-  if(!AUTH || !AUTH.access || AUTH.email) return Promise.resolve();
+  /* גם uid נדרש, לא רק מייל — מפגש שנוצר לפני שהוספנו אותו חייב רענון */
+  if(!AUTH || !AUTH.access || (AUTH.email && AUTH.uid)) return Promise.resolve();
   return fetch(CFG.supabaseUrl + '/auth/v1/user', {
     headers:{ apikey: CFG.supabaseKey, Authorization: 'Bearer ' + AUTH.access }
   }).then(function(r){ return r.ok ? r.json() : null; })
@@ -2486,8 +2496,15 @@ document.addEventListener('keydown', function(e){
 });
 
 render();
-if(authEnabled) loadIdentity();
-if(canSync()){ verifyAccess(false); pullCards(); flushQueue(); loadLibrary(); }
+if(canSync()){
+  verifyAccess(false);
+  pullCards();
+  flushQueue();
+  /* קודם זהות — הספרייה והבעלות תלויות ב-uid */
+  (authEnabled ? loadIdentity() : Promise.resolve()).then(loadLibrary);
+} else if(authEnabled) {
+  loadIdentity();
+}
 
 /* קישור לנושא — פותח את המאגר עם הנושא בראש הרשימה */
 (function(){
