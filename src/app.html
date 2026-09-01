@@ -419,6 +419,19 @@ h1{
 .scard .act.danger:hover{color:var(--bad);border-color:var(--bad)}
 .scard .act:disabled{opacity:.5;cursor:default}
 .scard.hl{border-color:var(--accent)}
+.diag{
+  border:1px dashed var(--line-2);border-radius:12px;padding:10px 12px;
+  font-family:"IBM Plex Sans",sans-serif;font-size:11.5px;color:var(--ink-2);
+  display:flex;flex-direction:column;gap:3px;
+}
+.diag b{color:var(--ink);letter-spacing:.1em;text-transform:uppercase;font-size:10px}
+.diag-acts{display:flex;gap:8px;margin-top:6px}
+.diag-acts button{
+  border:1px solid var(--line-2);border-radius:99px;padding:4px 11px;
+  font-size:11.5px;color:var(--ink-2);
+}
+.diag-acts button:hover{color:var(--accent);border-color:var(--accent)}
+.diag-acts button:disabled{opacity:.5}
 .panel.share{padding:13px 14px;display:flex;flex-direction:column;gap:10px}
 .share-row{display:flex;align-items:center;gap:12px}
 .share-row > div{flex:1;min-width:0}
@@ -2378,6 +2391,19 @@ function renderStore(){
       : '')+
     '<p class="note">פרסום הופך נושא לקריא לכל מי שמחובר. עריכה נשארת אצל הבעלים, '+
       'ומי שרשום רואה תמיד את הגרסה העדכנית.</p>'+
+    '<div class="diag">'+
+      '<div><b>מצב</b></div>'+
+      '<div>זהות: '+(AUTH && AUTH.uid ? '✓ ' + esc(String(AUTH.uid).slice(0,8)) : '✗ חסרה') +
+        ' · הרשאת עריכה: '+((AUTH && AUTH.editor) ? '✓' : '✗')+'</div>'+
+      '<div>מהשרת: '+(view.mine||[]).length+' שלי · '+(view.others||[]).length+' של אחרים · '+
+        (view.subs||[]).length+' מינויים</div>'+
+      '<div>במכשיר: '+((ROWS && ROWS.length) || 0)+' נושאים במטמון · '+
+        DECKS.length+' מוצגים</div>'+
+      '<div class="diag-acts">'+
+        '<button id="reloadSrv">משוך מהשרת</button>'+
+        '<button id="wipeCache">אפס מטמון מקומי</button>'+
+      '</div>'+
+    '</div>'+
   '</div>';
 
   app.querySelector('#backBtn').addEventListener('click', function(){ view={name:'home'}; render(); });
@@ -2403,6 +2429,19 @@ function renderStore(){
       }
       return loadLibrary().then(function(){ openStore(); });
     });
+  });
+
+  const rl = app.querySelector('#reloadSrv');
+  if(rl) rl.addEventListener('click', function(){
+    rl.disabled = true; rl.textContent = 'מושך…';
+    (AUTH && AUTH.uid ? Promise.resolve() : loadIdentity())
+      .then(loadLibrary).then(function(){ openStore(); });
+  });
+  const wc = app.querySelector('#wipeCache');
+  if(wc) wc.addEventListener('click', function(){
+    try{ localStorage.removeItem(ROWS_KEY); }catch(e){}
+    ROWS = null;
+    location.reload();
   });
 
   Array.prototype.forEach.call(app.querySelectorAll('[data-del]'), function(b){
