@@ -132,7 +132,29 @@ try {
   check(order === 'due', 'המתזמן לא הקדים את הכרטיס שהגיע זמנו');
 }
 
-/* 5 — בלי מפגש שמור, מסך הנעילה מופיע ושום דבר אחר לא */
+/* 5 — מסך העיון נבנה לכל חבילה, וכל פריט מקבל תיאור תקין */
+for (const deck of DECKS ?? []) {
+  check(typeof deck.browse === 'function', `${deck.id}: אין browse`);
+  if (typeof deck.browse !== 'function') continue;
+  for (const item of deck.items) {
+    const b = deck.browse(item);
+    if (!b || !b.title) { fail.push(`${deck.id}: פריט בעיון בלי כותרת`); break; }
+  }
+}
+try {
+  const first = DECKS[0];
+  win.eval(`(function(){ quiz=null; view={name:'browse', deck:${JSON.stringify(first.id)}, q:'', hide:false}; render(); })()`);
+  check(!!document.querySelector('.browse-wrap'), 'מסך העיון לא נרנדר');
+  check(document.querySelectorAll('.bcard').length === first.items.length,
+    `מסך העיון הראה ${document.querySelectorAll('.bcard').length} כרטיסים במקום ${first.items.length}`);
+  /* סינון שלא תואם לכלום לא אמור להשאיר כרטיסים */
+  win.eval(`(function(){ view.q='zzzzנונסנס'; render(); })()`);
+  check(document.querySelectorAll('.bcard').length === 0, 'הסינון בעיון לא סינן');
+} catch (e) {
+  fail.push('מסך העיון נפל: ' + e.message);
+}
+
+/* 6 — בלי מפגש שמור, מסך הנעילה מופיע ושום דבר אחר לא */
 {
   const locked = new JSDOM(html, {
     runScripts: 'dangerously',
