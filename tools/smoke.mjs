@@ -461,6 +461,26 @@ try {
   })()`));
   check(exp.stale === true, 'טוקן שפג לא זוהה');
   check(exp.fresh === false, 'טוקן תקף סומן כפג');
+
+  /* טוקן שאי אפשר לפענח חייב להיחשב פג. ההנחה ההפוכה מבטלת את הרענון
+     לגמרי, וכל שאילתה חוזרת 401 לנצח. */
+  const unreadable = JSON.parse(win.eval(`(function(){
+    const save = AUTH;
+    const out = {};
+    AUTH = {access:'לא-jwt-בכלל', refresh:'r'};       out.garbage = tokenStale();
+    AUTH = {access:'h..s', refresh:'r'};              out.empty   = tokenStale();
+    AUTH = {access:'h.' + btoa('{not-json') + '.s', refresh:'r'}; out.broken = tokenStale();
+    /* מטען עם תווים לא-ASCII חייב להיקרא בכל זאת */
+    const utf8 = btoa(unescape(encodeURIComponent(
+      JSON.stringify({exp: Math.floor(Date.now()/1000) + 3600, name:'שלמה'}))));
+    AUTH = {access:'h.' + utf8 + '.s', refresh:'r'};  out.hebrew = tokenStale();
+    AUTH = save;
+    return JSON.stringify(out);
+  })()`));
+  check(unreadable.garbage === true, 'טוקן לא קריא נחשב תקף');
+  check(unreadable.empty === true, 'טוקן בלי מטען נחשב תקף');
+  check(unreadable.broken === true, 'מטען שבור נחשב תקף');
+  check(unreadable.hebrew === false, 'מטען עם עברית נחשב פג — הפענוח נכשל');
 }
 
 /* 5i — כפתור «למה»: ניתן לנסות שוב אחרי כישלון, ושולח שאלה ותשובה לא ריקות */

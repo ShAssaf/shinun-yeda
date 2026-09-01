@@ -1258,11 +1258,22 @@ function rest(path, init, retried){
       Object.assign({}, init || {}, {headers: restHeaders()}));
   }).then(function(r){
     /* 401 אחרי רענון מקדים = הטוקן באמת פסול; מנסים רענון אחד ואז נכנעים */
-    if(r.status === 401 && !retried && AUTH && AUTH.refresh){
+    if(r.status === 401 && !retried){
+      if(!AUTH || !AUTH.refresh){
+        logError('fetch', where + ' → 401 בלי טוקן רענון', {hasAuth:!!AUTH});
+        return r;
+      }
       return refreshToken().then(function(ok){
-        if(!ok) return logFetch(where, r);
+        if(!ok){
+          logError('fetch', where + ' → 401 והרענון נכשל', {exp:tokenExp()});
+          return r;
+        }
         return rest(path, init, true);
       });
+    }
+    if(r.status === 401 && retried){
+      logError('fetch', where + ' → 401 גם אחרי רענון', {exp:tokenExp(), uid:!!(AUTH && AUTH.uid)});
+      return r;
     }
     return logFetch(where, r);
   }).catch(function(err){
@@ -2179,14 +2190,27 @@ function tokenExp(){
   if(!AUTH || !AUTH.access) return 0;
   try{
     const part = AUTH.access.split('.')[1];
+    if(!part) return 0;
     const pad = part.replace(/-/g,'+').replace(/_/g,'/');
-    const payload = JSON.parse(atob(pad + '==='.slice((pad.length + 3) % 4)));
+    const bin = atob(pad + '==='.slice((pad.length + 3) % 4));
+    /* המטען עלול להכיל תווים לא-ASCII (שם בעברית למשל), ואז JSON.parse
+       על פלט atob הגולמי נכשל. מפענחים כ-UTF-8. */
+    let text = bin;
+    try{
+      text = decodeURIComponent(Array.prototype.map.call(bin, function(c){
+        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+      }).join(''));
+    }catch(e){}
+    const payload = JSON.parse(text);
     return (payload.exp || 0) * 1000;
   }catch(e){ return 0; }
 }
 function tokenStale(){
   const exp = tokenExp();
-  return exp > 0 && Date.now() > exp - 60000;   /* דקה מרווח */
+  /* לא הצלחנו לקרוא תוקף — מניחים שפג ומרעננים. ההנחה ההפוכה גורמת
+     לכך שלא מרעננים לעולם, וכל שאילתה חוזרת 401. */
+  if(!exp) return true;
+  return Date.now() > exp - 60000;   /* דקה מרווח */
 }
 
 let refreshing = null;
@@ -2203,7 +2227,13 @@ function refreshToken(){
     method:'POST',
     headers:{ apikey: CFG.supabaseKey, 'Content-Type':'application/json' },
     body: JSON.stringify({ refresh_token: AUTH.refresh })
-  }).then(function(r){ return r.ok ? r.json() : null; })
+  }).then(function(r){
+      if(!r.ok) return r.text().then(function(t){
+        logError('fetch', 'refresh_token → ' + r.status, {body:String(t).slice(0,200)});
+        return null;
+      });
+      return r.json();
+    })
     .then(function(j){
       if(!j || !j.access_token){
         /* גם טוקן הרענון פג — אין דרך חזרה בלי התחברות מחדש */
