@@ -1,8 +1,8 @@
 {
-  "name": "shinun-biochem",
+  "name": "shinun-yeda",
   "version": "1.0.0",
   "private": true,
-  "description": "אפליקציית שינון לביוכימיה — קבוצות פונקציונליות, יסודות, איזומרים",
+  "description": "אפליקציית שינון בחזרה מרווחת — כל נושא, מכל שקף",
   "scripts": {
     "icons": "python3 tools/make-icons.py",
     "fonts": "node tools/embed-fonts.mjs",

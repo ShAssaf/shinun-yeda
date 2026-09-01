@@ -1,6 +1,6 @@
 {
   "appId": "il.shlomo.shinun",
-  "appName": "שינון ביוכימיה",
+  "appName": "שינון ידע",
   "webDir": "www",
   "android": {
     "allowMixedContent": false,
@@ -8,7 +8,7 @@
   },
   "server": {
     "androidScheme": "https",
-    "url": "https://shassaf.github.io/shinun-biochem/",
+    "url": "https://shassaf.github.io/shinun-yeda/",
     "cleartext": false
   }
 }

@@ -18,7 +18,7 @@ vc.on('jsdomError', (e) => fail.push('שגיאת JS בטעינה: ' + e.message)
 const dom = new JSDOM(html, {
   runScripts: 'dangerously',
   pretendToBeVisual: true,
-  url: 'https://shassaf.github.io/shinun-biochem/',
+  url: 'https://shassaf.github.io/shinun-yeda/',
   virtualConsole: vc,
   /* jsdom לא מממש את אלה — חייבים להזריק לפני שסקריפטי הדף רצים */
   beforeParse(w) {
@@ -137,7 +137,7 @@ try {
   const locked = new JSDOM(html, {
     runScripts: 'dangerously',
     pretendToBeVisual: true,
-    url: 'https://shassaf.github.io/shinun-biochem/',
+    url: 'https://shassaf.github.io/shinun-yeda/',
     virtualConsole: vc,
     beforeParse(w) {
       w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
