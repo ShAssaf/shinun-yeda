@@ -1270,6 +1270,9 @@ function importStarter(){
       if(!r.ok) return r.text().then(function(t){
         let msg = t;
         try{ msg = JSON.parse(t).message || t; }catch(e){}
+        /* אינדקס הייחודיות חסם הוספה כפולה — לא כישלון, פשוט כבר קיים */
+        if(String(msg).indexOf('decks_owner_kind_title_uniq') > -1)
+          return {ok:true, count:0, note:'הכול כבר קיים אצלך.'};
         return {ok:false, error:'השרת דחה: ' + String(msg).slice(0,160)};
       });
       return r.json().then(function(created){
