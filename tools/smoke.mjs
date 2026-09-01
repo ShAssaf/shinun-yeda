@@ -219,6 +219,18 @@ try {
   /* קישור מוצע רק לנושא שכבר פורסם */
   check(document.querySelectorAll('[data-link]').length === 1, 'קישור מוצע לנושא שאינו ציבורי');
 
+
+  check(document.querySelectorAll('[data-sub]').length === 2, 'אין כפתורי מינוי לחבילות של אחרים');
+  /* חבילה שאני רשום אליה מוצגת כ"הסר", ואחת שלא — כ"הוסף" */
+  const subBtns = Array.from(document.querySelectorAll('[data-sub]'));
+  const joined = subBtns.find((b) => b.dataset.sub === 's1');
+  const free = subBtns.find((b) => b.dataset.sub === 's2');
+  check(joined?.textContent.trim() === 'הסר', 'מינוי קיים לא סומן');
+  check(free?.textContent.trim() === 'הוסף', 'חבילה שלא נרשמתי אליה סומנה כרשומה');
+  /* פרטית מציעה לפרסם, ציבורית מציעה להפוך לפרטית */
+  const pubBtns = Array.from(document.querySelectorAll('[data-pub]'));
+  check(pubBtns.find((b) => b.dataset.pub === 'm1')?.dataset.to === 'public', 'פרטית לא מציעה פרסום');
+  check(pubBtns.find((b) => b.dataset.pub === 'm2')?.dataset.to === 'private', 'ציבורית לא מציעה החזרה לפרטית');
   /* נושא שקיים בחבילה המוטמעת ואינו בספרייה חייב להיות מוצע לייבוא,
      גם כשיש כבר נושאים אחרים — כך תוכן שנתקע במסלול הישן לא אובד. */
   const offer = JSON.parse(win.eval(`(function(){
@@ -235,17 +247,6 @@ try {
   check(offer.offered, 'נושאים שלא יובאו אינם מוצעים כשכבר יש ספרייה');
   check(offer.label.indexOf(String(offer.total - 1)) > -1,
     'מספר הנושאים לייבוא שגוי: ' + offer.label);
-  check(document.querySelectorAll('[data-sub]').length === 2, 'אין כפתורי מינוי לחבילות של אחרים');
-  /* חבילה שאני רשום אליה מוצגת כ"הסר", ואחת שלא — כ"הוסף" */
-  const subBtns = Array.from(document.querySelectorAll('[data-sub]'));
-  const joined = subBtns.find((b) => b.dataset.sub === 's1');
-  const free = subBtns.find((b) => b.dataset.sub === 's2');
-  check(joined?.textContent.trim() === 'הסר', 'מינוי קיים לא סומן');
-  check(free?.textContent.trim() === 'הוסף', 'חבילה שלא נרשמתי אליה סומנה כרשומה');
-  /* פרטית מציעה לפרסם, ציבורית מציעה להפוך לפרטית */
-  const pubBtns = Array.from(document.querySelectorAll('[data-pub]'));
-  check(pubBtns.find((b) => b.dataset.pub === 'm1')?.dataset.to === 'public', 'פרטית לא מציעה פרסום');
-  check(pubBtns.find((b) => b.dataset.pub === 'm2')?.dataset.to === 'private', 'ציבורית לא מציעה החזרה לפרטית');
 } catch (e) {
   fail.push('מסך החנות נפל: ' + e.message);
 }
