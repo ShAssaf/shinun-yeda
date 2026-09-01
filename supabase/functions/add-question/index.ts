@@ -341,7 +341,8 @@ Deno.serve(async (req) => {
 
     const anthropic = new Anthropic({ apiKey: env.key });
     const t0 = Date.now();
-    const message = await anthropic.messages.create({
+    /* סטרימינג מאותה סיבה כמו ב-edit-app */
+    const stream = anthropic.messages.stream({
       model: env.model!,
       max_tokens: 8000,
       thinking: { type: 'adaptive' },
@@ -362,6 +363,7 @@ Deno.serve(async (req) => {
           + `\n\nבקשת המשתמש:\n${ask}${hint}\n\nקרא לכלי propose_patch.`,
       }],
     });
+    const message = await stream.finalMessage();
 
     const llmSecs = Math.round((Date.now() - t0) / 1000);
     console.log(`Claude החזיר אחרי ${llmSecs}s`);

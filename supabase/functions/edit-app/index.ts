@@ -191,7 +191,9 @@ Deno.serve(async (req) => {
     const app = await readFile(env.repo!, env.token!, 'src/app.html');
 
     const anthropic = new Anthropic({ apiKey: env.key });
-    const message = await anthropic.messages.create({
+    /* סטרימינג — ה-SDK מסרב לקריאה לא-סטרימית עם max_tokens גבוה,
+       כי היא עלולה לחצות את תקרת עשר הדקות של בקשת HTTP אחת. */
+    const stream = anthropic.messages.stream({
       model: env.model!,
       max_tokens: 32000,
       thinking: { type: 'adaptive' },
@@ -204,6 +206,9 @@ Deno.serve(async (req) => {
           + `בקשת השינוי:\n${ask}\n\nקרא לכלי propose_code_edit.`,
       }],
     });
+    const t0 = Date.now();
+    const message = await stream.finalMessage();
+    console.log(`Claude החזיר אחרי ${Math.round((Date.now() - t0) / 1000)}s`);
 
     const call = message.content.find((b) => b.type === 'tool_use');
     if (!call) {
