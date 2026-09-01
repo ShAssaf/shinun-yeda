@@ -105,6 +105,9 @@ function validateItem(deck: DeckKey, item: Record<string, unknown>, i: number, e
 }
 
 const MAX_CARDS = 200;
+const MAX_IMAGES = 4;
+const MAX_IMAGE_BYTES = 5_000_000;          /* אחרי base64, לכל התמונות יחד */
+const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
 function validateTopic(item: Record<string, unknown>, i: number, errs: string[]) {
   const path = `topics[${i}]`;
@@ -217,6 +220,14 @@ isoPairs — זוג מבנים לזיהוי היחס:
 - אל תמציא גיאומטריה מסובכת. שרשרת אופקית פשוטה עדיפה על טבעת שגויה.
 - לטריז ומקווקו יש משמעות סטראוכימית — השתמש בהם רק כשהיא רלוונטית.
 
+אם צורפו תמונות, הן צילומי מסך של שקפים מהרצאה:
+- קרא את השקף, חלץ את המושגים שנבחנים עליהם, ובנה מהם פריטים.
+- ברירת המחדל לשקף היא חבילת topics חדשה, עם כותרת שנגזרת מנושא השקף.
+  אם השקף עוסק בקבוצות פונקציונליות, ביסודות או באיזומריה — הוסף לחבילה הקיימת.
+- אל תמציא מה שלא בשקף. אם משהו לא קריא, דלג עליו במקום לנחש.
+- כמה פריטים שהשקף מצדיק, בין 4 ל-20. שקף אחד עמוס עדיף שיפוצל לפריטים נפרדים.
+- אם צורפה גם בקשה בטקסט, היא גוברת על ברירות המחדל האלה.
+
 כללים:
 - id ייחודי, באותיות אנגליות קטנות ומקפים. אל תתנגש ב-id קיים אלא אם אתה מתקן פריט קיים (אז mode="replace" ואותו id).
 - טקסט למשתמש בעברית. שמות אנגליים נשארים באנגלית.
@@ -287,7 +298,10 @@ Deno.serve(async (req) => {
     if (!v) return json({ error: `חסר משתנה סביבה: ${k}` }, 500);
   }
 
-  let body: { passphrase?: string; request?: string; deck?: string; check?: boolean };
+  type Shot = { media_type: string; data: string };
+  let body: {
+    passphrase?: string; request?: string; deck?: string; check?: boolean; images?: Shot[];
+  };
   try { body = await req.json(); } catch { return json({ error: 'גוף הבקשה אינו JSON' }, 400); }
 
   const auth = await authorize(req, body, env.pass!);
@@ -309,8 +323,17 @@ Deno.serve(async (req) => {
   }
 
   const ask = (body.request ?? '').trim();
-  if (!ask) return json({ error: 'הבקשה ריקה' }, 400);
+  const shots = Array.isArray(body.images) ? body.images.slice(0, MAX_IMAGES) : [];
+
+  if (!ask && !shots.length) return json({ error: 'הבקשה ריקה' }, 400);
   if (ask.length > 2000) return json({ error: 'הבקשה ארוכה מדי' }, 400);
+  let bytes = 0;
+  for (const sh of shots) {
+    if (!IMAGE_TYPES.includes(sh?.media_type)) return json({ error: 'סוג תמונה לא נתמך' }, 400);
+    if (typeof sh?.data !== 'string' || !sh.data) return json({ error: 'תמונה ריקה' }, 400);
+    bytes += sh.data.length;
+  }
+  if (bytes > MAX_IMAGE_BYTES) return json({ error: 'התמונות כבדות מדי. צרף פחות שקפים.' }, 400);
 
   try {
     /* התוכן הנוכחי — גם כהקשר ל-Claude וגם לצורך ה-sha של ה-commit */
@@ -339,29 +362,36 @@ Deno.serve(async (req) => {
       ? `\nהמשתמש בחר את החבילה: ${({ fg: 'groups', el: 'elements', iso: 'iso / isoTerms / isoPairs' })[body.deck as 'fg'] ?? body.deck}`
       : '';
 
+    /* תמונות לפני הטקסט — כך ממליץ התיעוד, והמודל מתייחס אליהן כהקשר לבקשה */
+    const userContent: Anthropic.ContentBlockParam[] = shots.map((sh) => ({
+      type: 'image' as const,
+      source: { type: 'base64' as const, media_type: sh.media_type as 'image/jpeg', data: sh.data },
+    }));
+    userContent.push({
+      type: 'text',
+      text: `מזהים קיימים בכל חבילה:\n${JSON.stringify(existing)}\n\n`
+        + `דוגמאות לפריטים קיימים (לחיקוי הסגנון):\n`
+        + JSON.stringify({
+          groups: current.groups?.slice(0, 2),
+          elements: current.elements?.slice(0, 1),
+          isoPairs: current.isoPairs?.slice(0, 1),
+        })
+        + (shots.length ? `\n\nצורפו ${shots.length} צילומי שקפים.` : '')
+        + `\n\nבקשת המשתמש:\n${ask || '(אין טקסט — בנה מהשקפים)'}${hint}\n\nקרא לכלי propose_patch.`,
+    });
+
     const anthropic = new Anthropic({ apiKey: env.key });
     const t0 = Date.now();
     /* סטרימינג מאותה סיבה כמו ב-edit-app */
     const stream = anthropic.messages.stream({
       model: env.model!,
-      max_tokens: 8000,
+      /* שקף מייצר חבילה שלמה, ולכן יותר טוקנים ומאמץ גבוה יותר */
+      max_tokens: shots.length ? 24000 : 8000,
       thinking: { type: 'adaptive' },
-      /* medium ולא high — פריט תוכן אינו משימה קשה, וזמן ריצה ארוך
-         מסתכן בתקרת הזמן של Edge Function ונופל כ-Failed to fetch */
-      output_config: { effort: 'medium' },
+      output_config: { effort: shots.length ? 'high' : 'medium' },
       system: SYSTEM,
       tools: [TOOL],
-      messages: [{
-        role: 'user',
-        content: `מזהים קיימים בכל חבילה:\n${JSON.stringify(existing)}\n\n`
-          + `דוגמאות לפריטים קיימים (לחיקוי הסגנון):\n`
-          + JSON.stringify({
-            groups: current.groups?.slice(0, 2),
-            elements: current.elements?.slice(0, 1),
-            isoPairs: current.isoPairs?.slice(0, 1),
-          })
-          + `\n\nבקשת המשתמש:\n${ask}${hint}\n\nקרא לכלי propose_patch.`,
-      }],
+      messages: [{ role: 'user', content: userContent }],
     });
     const message = await stream.finalMessage();
 

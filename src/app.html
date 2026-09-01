@@ -311,6 +311,23 @@ h1{
 }
 .sheet .examples button:hover{color:var(--accent);border-color:var(--accent)}
 
+/* ---------- תמונות בגיליון ההוספה ---------- */
+.pick{
+  display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
+  border:1px dashed var(--line-2);border-radius:12px;padding:12px;
+  font-size:14px;color:var(--ink-2);
+}
+.pick:hover{color:var(--accent);border-color:var(--accent)}
+.shots{display:flex;flex-wrap:wrap;gap:8px}
+.shot{position:relative;width:74px;height:74px;border-radius:10px;overflow:hidden;border:1px solid var(--line)}
+.shot img{width:100%;height:100%;object-fit:cover;display:block}
+.shot button{
+  position:absolute;top:3px;inset-inline-end:3px;width:20px;height:20px;border-radius:99px;
+  background:rgba(8,14,13,.78);color:#fff;font-size:13px;line-height:1;
+  display:grid;place-items:center;
+}
+.shot button:hover{background:var(--bad)}
+
 /* ---------- מעבדה — שינוי האפליקציה עצמה ---------- */
 .lab-entry{
   display:flex;align-items:center;justify-content:center;gap:7px;width:100%;
@@ -851,6 +868,7 @@ function next(){
 function icon(kind){
   if(kind==='home') return '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/></svg>';
   if(kind==='google') return '<svg width="17" height="17" viewBox="0 0 48 48"><path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.2-.4-4.7H24v8.9h11.8c-.5 2.7-2 5-4.4 6.6v5.5h7.1c4.2-3.8 6.6-9.5 6.6-16.3z"/><path fill="#34A853" d="M24 46c6 0 11-2 14.6-5.4l-7.1-5.5c-2 1.3-4.5 2.1-7.5 2.1-5.8 0-10.7-3.9-12.4-9.1H4.3v5.7C7.9 41.1 15.4 46 24 46z"/><path fill="#FBBC05" d="M11.6 28.1c-.4-1.3-.7-2.7-.7-4.1s.3-2.8.7-4.1v-5.7H4.3C2.8 17.1 2 20.4 2 24s.8 6.9 2.3 9.8l7.3-5.7z"/><path fill="#EA4335" d="M24 10.8c3.3 0 6.2 1.1 8.5 3.3l6.3-6.3C35 4.1 30 2 24 2 15.4 2 7.9 6.9 4.3 14.2l7.3 5.7c1.7-5.2 6.6-9.1 12.4-9.1z"/></svg>';
+  if(kind==='camera') return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5A1.5 1.5 0 0 1 4.5 7h2.2l1.2-2h8.2l1.2 2h2.2A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/><circle cx="12" cy="13" r="3.4"/></svg>';
   if(kind==='wrench') return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0 5 5l-8.4 8.4a2.1 2.1 0 0 1-3-3z"/><path d="M19.7 11.3 21 6l-2.5.7L17 4l-2.3 2.3"/></svg>';
   if(kind==='plus') return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
   return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 6l-6 6 6 6"/></svg>';
@@ -1188,9 +1206,32 @@ function callFn(url, payload, retried){
     });
 }
 
+/* מכווצים בצד הלקוח: שקף בגודל מלא הוא בזבוז טוקנים, ו-1568px
+   היא הקצה הארוך שמעברו התמונה מוקטנת ממילא בצד השרת. */
+const MAX_EDGE = 1568, MAX_SHOTS = 4;
+function shrinkImage(file){
+  return new Promise(function(resolve, reject){
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = function(){
+      const scale = Math.min(1, MAX_EDGE / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width*scale)), h = Math.max(1, Math.round(img.height*scale));
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      const data = c.toDataURL('image/jpeg', 0.82);
+      resolve({ media_type:'image/jpeg', data: data.slice(data.indexOf(',')+1) });
+    };
+    img.onerror = function(){ URL.revokeObjectURL(url); reject(new Error('לא הצלחתי לקרוא את התמונה')); };
+    img.src = url;
+  });
+}
+
 const EXAMPLES = [
   'תוסיף שאלה על הקבוצה הפוספודיאסטר',
-  'תוסיף את היסוד ליתיום כיסוד קורט',
+  'בנה חבילה מהשקף המצורף',
+  'רק המושגים המודגשים בשקף',
   'ההגדרה של אנומרים לא מדויקת — תקן',
 ];
 
@@ -1201,12 +1242,16 @@ function openAddSheet(){
     '<div class="sheet" role="dialog" aria-modal="true" aria-label="הוספת שאלה">'+
       '<div class="sheet-head"><h2>הוסף שאלה או תיקון</h2>'+
         '<button id="sheetClose">סגור</button></div>'+
-      '<p class="hint">כתוב בשפה חופשית מה להוסיף או מה לתקן. Claude ינסח את הפריט, '+
-        'יוסיף אותו לתוכן ויעלה גרסה חדשה של האתר. לוקח כדקה־שתיים.</p>'+
+      '<p class="hint">צלם שקף מההרצאה, כתוב בקשה, או שניהם. Claude יקרא, '+
+        'ינסח את הפריטים ויעלה גרסה חדשה של האתר. לוקח כדקה־שתיים.</p>'+
       '<div class="examples">'+EXAMPLES.map(function(e,i){
         return '<button data-ex="'+i+'">'+esc(e)+'</button>'; }).join('')+'</div>'+
+      '<div><label>שקפים</label>'+
+        '<button class="pick" id="addPick">'+icon('camera')+' צלם או בחר תמונות</button>'+
+        '<input id="addFile" type="file" accept="image/*" multiple hidden>'+
+        '<div class="shots" id="addShots"></div></div>'+
       '<div><label for="addTxt">הבקשה</label>'+
-        '<textarea id="addTxt" placeholder="למשל: תוסיף שאלה על קבוצת הסולפט, ואת התפקיד שלה"></textarea></div>'+
+        '<textarea id="addTxt" placeholder="אפשר להשאיר ריק אם צירפת שקף. או: תוסיף שאלה על קבוצת הסולפט ואת התפקיד שלה"></textarea></div>'+
       '<div><label for="addDeck">לאיזו חבילה</label>'+
         '<select id="addDeck">'+
           '<option value="auto">שיקבע לבד</option>'+
@@ -1220,6 +1265,31 @@ function openAddSheet(){
   const txt = bg.querySelector('#addTxt');
   const status = bg.querySelector('#addStatus');
   const send = bg.querySelector('#addSend');
+  const fileInput = bg.querySelector('#addFile');
+  const shotsBox = bg.querySelector('#addShots');
+  const shots = [];
+
+  function drawShots(){
+    shotsBox.innerHTML = shots.map(function(sh, i){
+      return '<div class="shot"><img alt="שקף '+(i+1)+'" src="data:'+sh.media_type+';base64,'+sh.data+'">'+
+        '<button data-rm="'+i+'" aria-label="הסר">×</button></div>';
+    }).join('');
+    Array.prototype.forEach.call(shotsBox.querySelectorAll('button'), function(b){
+      b.addEventListener('click', function(){ shots.splice(+b.dataset.rm, 1); drawShots(); });
+    });
+  }
+  bg.querySelector('#addPick').addEventListener('click', function(){ fileInput.click(); });
+  fileInput.addEventListener('change', function(){
+    const files = Array.prototype.slice.call(fileInput.files, 0, MAX_SHOTS - shots.length);
+    fileInput.value = '';
+    if(!files.length){ say('bad','אפשר לצרף עד '+MAX_SHOTS+' תמונות.'); return; }
+    say('work','מכווץ תמונות…');
+    Promise.all(files.map(shrinkImage)).then(function(list){
+      list.forEach(function(x){ shots.push(x); });
+      drawShots();
+      status.hidden = true;
+    }).catch(function(err){ say('bad', err.message); });
+  });
   function close(){ bg.remove(); document.removeEventListener('keydown', onKey); }
   function onKey(e){ if(e.key==='Escape') close(); }
   document.addEventListener('keydown', onKey);
@@ -1234,11 +1304,12 @@ function openAddSheet(){
 
   send.addEventListener('click', function(){
     const body = txt.value.trim();
-    if(!body){ say('bad','צריך לכתוב מה להוסיף.'); txt.focus(); return; }
+    if(!body && !shots.length){ say('bad','צרף שקף או כתוב מה להוסיף.'); txt.focus(); return; }
     send.disabled = true;
-    say('work','Claude כותב את הפריט ומעדכן את התוכן…');
+    say('work', shots.length ? 'Claude קורא את השקפים ובונה מהם שאלות…'
+                             : 'Claude כותב את הפריט ומעדכן את התוכן…');
     callFn(CFG.addQuestionUrl,
-      { request:body, deck:bg.querySelector('#addDeck').value }
+      { request:body, deck:bg.querySelector('#addDeck').value, images:shots }
     ).then(function(res){
       if(res.status===401){ say('bad', res.body.error || 'ההתחברות נדחתה.'); send.disabled=false; return; }
       if(!res.ok){ say('bad', res.body.error || ('השרת החזיר '+res.status)); send.disabled=false; return; }
