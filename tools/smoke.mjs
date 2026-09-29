@@ -989,53 +989,77 @@ const ACT_FIXTURES = `
   check(r.browse === '4,מיון', 'העיון לא מציג תרגילים: ' + r.browse);
 }
 
-/* 5r — כפתור אחורה של המכשיר חוזר מסך אחד, ויוצא רק ממסך הבית */
+/* 5r — כפתור אחורה של המכשיר חוזר מסך אחד, ויוצא רק ממסך הבית.
+   כרום מדלג באחורה על רשומה שנוספה בלי נגיעה, ולכן בזמן לחיצת אחורה
+   אסור שיתווסף pushState — זה מה ששבר את התיקון הקודם על הטלפון. */
 try {
   /* בלי רשומה לחזור אליה אין popstate — לא ממתינים לנצח */
   const popped = () => new Promise((r) => {
-    win.addEventListener('popstate', () => setTimeout(r, 0), { once: true });
-    setTimeout(r, 300);
+    win.addEventListener('popstate', () => setTimeout(r, 60), { once: true });
+    setTimeout(r, 400);
   });
-  const settle = () => new Promise((r) => setTimeout(r, 30));
+  const settle = () => new Promise((r) => setTimeout(r, 120));
+  let pushes = 0;
+  const realPush = win.history.pushState.bind(win.history);
+  win.history.pushState = (...a) => { pushes++; return realPush(...a); };
+  const back = async () => { pushes = 0; const p = popped(); win.history.back(); await p; await settle(); };
   const at = () => JSON.parse(win.eval(`JSON.stringify({
     name: quiz ? 'quiz' : view.name, deck: view.deck || null,
-    guard: !!(history.state && history.state.shinun), len: history.length,
-    sheet: !!document.querySelector('.sheet-bg') })`));
+    d: (histEntry() || {d:0}).d, sheet: !!document.querySelector('.sheet-bg') })`));
 
   /* בדיקות קודמות ריקנו את הספרייה */
   win.eval(`LIB.status='ok'; LIB.rows=localRows(); applyRows(); quiz=null; view={name:'home'}; renderNow();`);
   await settle();
-  const base = at();
-  check(!base.guard, 'במסך הבית נשארה רשומת היסטוריה — אחורה לא יצא');
+  check(at().d === 0, 'במסך הבית נשארה רשומת היסטוריה — אחורה לא יצא');
 
   const first = win.eval('DECKS[0].id'), id = JSON.stringify(first);
+  const mode = JSON.stringify(win.eval('DECKS[0].modes[0].id'));
   win.eval(`view={name:'deck', deck:${id}}; renderNow();`);
-  check(at().guard, 'מעבר לחבילה לא הוסיף רשומת היסטוריה');
+  check(at().d === 1, 'מעבר לחבילה לא הוסיף רשומת היסטוריה');
   win.eval(`view={name:'browse', deck:${id}, q:'', hide:false}; renderNow();`);
-  check(at().len <= 2, 'כל מסך הוסיף רשומה משלו במקום שומר אחד');
+  check(at().d === 2, 'מעבר לעיון לא הוסיף רשומה');
 
-  let p = popped(); win.history.back(); await p;
+  await back();
   let s = at();
   check(s.name === 'deck' && s.deck === first, `אחורה מעיון הגיע ל-${s.name} במקום לחבילה`);
-  check(s.guard, 'אחרי חזרה לחבילה אין שומר — הלחיצה הבאה תצא');
+  check(pushes === 0, 'לחיצת אחורה הוסיפה רשומה — כרום ידלג עליה והלחיצה הבאה תצא');
+  check(s.d === 1, `אחרי חזרה לחבילה הרשומה בעומק ${s.d}`);
 
-  p = popped(); win.history.back(); await p;
+  await back();
   s = at();
-  check(s.name === 'home' && !s.guard, `אחורה מחבילה הגיע ל-${s.name} במקום לבית`);
+  check(s.name === 'home' && s.d === 0, `אחורה מחבילה הגיע ל-${s.name}`);
+  check(pushes === 0, 'לחיצת אחורה שנייה הוסיפה רשומה');
 
-  /* סבב כללי: כפתור הבית בחידון שלח לחבילה 'all' שאינה קיימת, ונפל */
-  win.eval(`startMixed(); renderNow(); document.getElementById('homeBtn').click();`);
+  /* חידון מתוך חבילה: שתי לחיצות מחזירות לחבילה ואז לבית */
+  win.eval(`view={name:'deck', deck:${id}}; renderNow(); startQuiz(${id}, ${mode}); renderNow();`);
+  check(at().d === 2, `חידון מתוך חבילה בעומק ${at().d}`);
+  await back();
+  s = at();
+  check(s.name === 'deck' && pushes === 0, `אחורה מחידון הגיע ל-${s.name}`);
+  await back();
+  check(at().name === 'home', 'אחורה שני מחידון לא הגיע לבית');
+
+  /* סבב כללי: כפתור הבית בחידון מחזיר לבית ומנקה את הרשומה */
+  win.eval(`startMixed(); renderNow();`);
+  check(at().d === 1, 'סבב כללי לא הוסיף רשומה');
+  win.eval(`document.getElementById('homeBtn').click();`);
   await settle();
   s = at();
-  check(s.name === 'home' && !s.guard, `יציאה מסבב כללי הגיעה ל-${s.name}`);
+  check(s.name === 'home' && s.d === 0, `יציאה מסבב כללי הגיעה ל-${s.name}, עומק ${s.d}`);
+
+  /* כפתור חזרה בתוך האפליקציה שקופץ שני מסכים — שתי הרשומות יורדות */
+  win.eval(`view={name:'deck', deck:${id}}; renderNow(); view={name:'browse', deck:${id}, q:'', hide:false}; renderNow();`);
+  win.eval(`view={name:'home'}; renderNow();`);
+  await settle(); await settle();
+  check(at().d === 0, `קפיצה לבית השאירה רשומה בעומק ${at().d}`);
 
   win.eval(`openExamSheet();`);
   await settle();
-  check(at().guard, 'גיליון פתוח לא הוסיף רשומת היסטוריה');
-  p = popped(); win.history.back(); await p;
+  check(at().d === 1, 'גיליון פתוח לא הוסיף רשומת היסטוריה');
+  await back();
   s = at();
-  check(!s.sheet && s.name === 'home', 'אחורה לא סגר את הגיליון');
-  check(s.len <= 2, `ההיסטוריה גדלה ל-${s.len} אחרי סבב שלם`);
+  check(!s.sheet && s.name === 'home' && s.d === 0, 'אחורה לא סגר את הגיליון');
+  win.history.pushState = realPush;
 } catch (e) {
   fail.push('כפתור אחורה נפל: ' + e.message);
 }
