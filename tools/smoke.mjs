@@ -4,6 +4,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import vm from 'node:vm';
 import { JSDOM, VirtualConsole } from 'jsdom';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -685,8 +686,33 @@ try {
   check(order.seen.join(',') === 'work,sync', 'סדר הפעולות: ' + order.seen.join(','));
   check(order.out === 'done', 'mutate לא מחזיר את תוצאת הפעולה');
 
-  check(win.eval('syncLibrary.toString()').indexOf('if(syncing) return syncing') > -1,
-    'סנכרונים מקבילים לא מתאחדים');
+  /* סנכרון שרץ התחיל לפני השינוי — מי שמבקש בזמנו מקבל סבב אחד נוסף
+     אחריו, משותף לכולם, ולא את התשובה הישנה */
+  const queue = JSON.parse(await win.eval(`(function(){
+    const realLoad = loadLibrary;
+    const seen = [];
+    let n = 0, release;
+    loadLibrary = function(){
+      const id = ++n;
+      seen.push('start' + id);
+      if(id === 1) return new Promise(function(r){ release = r; })
+        .then(function(){ seen.push('end1'); return {ok:true, data:LIB.rows}; });
+      seen.push('end' + id);
+      return Promise.resolve({ok:true, data:LIB.rows});
+    };
+    syncing = null; syncQueued = null;
+    const first = syncLibrary();
+    const a = syncLibrary(), b = syncLibrary();
+    release();
+    return Promise.all([first, a, b]).then(function(){
+      loadLibrary = realLoad;
+      return JSON.stringify({seen:seen, same:a === b, idle:syncing === null && syncQueued === null});
+    });
+  })()`));
+  check(queue.seen.join(',') === 'start1,end1,start2,end2',
+    'סנכרון בזמן ריצה: ' + queue.seen.join(','));
+  check(queue.same, 'בקשות בזמן ריצה לא מתאחדות לסבב אחד');
+  check(queue.idle, 'הסנכרון לא השתחרר בסוף');
 }
 
 /* 5p — הגדרות המשתמש נשמרות בשרת, לא רק בדפדפן */
@@ -783,6 +809,45 @@ try {
     check(!d.querySelector('.deck-list'), 'התוכן דלף אל מסך הנעילה');
   }
   locked.window.close();
+}
+
+/* ה-SW מטפל רק בקבצי האפליקציה. קריאה ל-Supabase שעברה בו נשמרה
+   בקאש-תחילה, וכרטיסים חדשים לא הופיעו עד איפוס ידני. */
+{
+  const handlers = {};
+  const put = [];
+  const sandbox = {
+    self: {
+      location: new URL('https://shassaf.github.io/shinun-yeda/sw.js'),
+      addEventListener: (type, fn) => { handlers[type] = fn; },
+    },
+    caches: {
+      match: () => Promise.resolve(undefined),
+      open: () => Promise.resolve({ put: (req) => { put.push(req.url); } }),
+    },
+    fetch: (req) => Promise.resolve({ ok: req.url.indexOf('missing') < 0, clone() { return this; } }),
+    URL,
+  };
+  vm.runInNewContext(await readFile(join(ROOT, 'www', 'sw.js'), 'utf8'), sandbox);
+
+  const fire = (url) => {
+    let answer = null;
+    handlers.fetch({
+      request: { url, method: 'GET', mode: 'cors' },
+      respondWith: (p) => { answer = p; },
+    });
+    return answer;
+  };
+
+  check(fire('https://x.supabase.co/rest/v1/decks?select=id') === null,
+    'ה-SW יירט קריאה ל-Supabase');
+  const own = fire('https://shassaf.github.io/shinun-yeda/icons/icon-192.png');
+  check(own !== null, 'ה-SW לא מטפל בקבצי האפליקציה');
+  await own;
+  await fire('https://shassaf.github.io/shinun-yeda/icons/missing.png');
+  await new Promise((r) => setTimeout(r, 0));
+  check(put.some((u) => u.endsWith('icon-192.png')), 'ה-SW לא שמר קובץ תקין בקאש');
+  check(!put.some((u) => u.endsWith('missing.png')), 'ה-SW שמר בקאש תשובת שגיאה');
 }
 
 dom.window.close();

@@ -1564,10 +1564,22 @@ function importStarter(){
    ואם גם הוא ריק — מהתוכן המוטמע, כדי שהאפליקציה לא תהיה ריקה. */
 /* כל פעולה שמשנה תוכן מסתיימת בסנכרון. בלי זה כל שינוי דורש
    מהמשתמש לרענן ידנית, וזה בדיוק מה שלא אמור לקרות. */
-let syncing = null;
+/* סנכרון שכבר רץ התחיל לפני השינוי, ותשובתו עלולה לא לכלול אותו.
+   לכן קריאה בזמן ריצה לא מצטרפת אליו אלא נרשמת לסבב נוסף אחריו —
+   אחד בלבד, שמשרת את כל מי שביקש בינתיים. */
+let syncing = null, syncQueued = null;
 function syncLibrary(){
-  if(syncing) return syncing;
-  syncing = loadLibrary().then(function(res){ syncing = null; return res; });
+  if(syncing){
+    if(!syncQueued){
+      const next = function(){ syncQueued = null; return syncLibrary(); };
+      syncQueued = syncing.then(next, next);
+    }
+    return syncQueued;
+  }
+  const done = function(){ syncing = null; };
+  syncing = loadLibrary().then(
+    function(res){ done(); return res; },
+    function(err){ done(); throw err; });
   return syncing;
 }
 
