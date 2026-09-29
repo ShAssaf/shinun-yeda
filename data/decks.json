@@ -3018,6 +3018,215 @@
           "frontSub": "Mitochondrial matrix",
           "back": "כל האנזימים מסיסים במטריקס המיטוכונדריאלי, פרט לסוקצינט דהידרוגנאז שמעוגן בממברנה הפנימית",
           "note": "בפרוקריוטים המסלול מתרחש בציטופלזמה"
+        },
+        {
+          "id": "krebs-order",
+          "type": "order",
+          "cycle": true,
+          "ask": "steps",
+          "prompt": "השלם את תוצרי הביניים של מעגל קרבס, לפי הסדר",
+          "steps": [
+            {
+              "label": "אוקסלואצטט",
+              "sub": "Oxaloacetate",
+              "given": true
+            },
+            {
+              "label": "ציטרט",
+              "sub": "Citrate"
+            },
+            {
+              "label": "איזוציטרט",
+              "sub": "Isocitrate"
+            },
+            {
+              "label": "α-קטוגלוטרט",
+              "sub": "α-Ketoglutarate"
+            },
+            {
+              "label": "סוקסיניל-CoA",
+              "sub": "Succinyl-CoA"
+            },
+            {
+              "label": "סוקצינט",
+              "sub": "Succinate"
+            },
+            {
+              "label": "פומרט",
+              "sub": "Fumarate"
+            },
+            {
+              "label": "מלאט",
+              "sub": "Malate"
+            }
+          ],
+          "extra": [
+            "פירובט",
+            "לקטט"
+          ],
+          "note": "פירובט ולקטט אינם תוצרי ביניים של המעגל — פירובט נכנס דרך אצטיל-CoA."
+        },
+        {
+          "id": "krebs-enzymes",
+          "type": "order",
+          "cycle": true,
+          "ask": "arrows",
+          "prompt": "שבץ את האנזים של כל שלב במעגל קרבס",
+          "steps": [
+            {
+              "label": "אוקסלואצטט",
+              "sub": "Oxaloacetate",
+              "arrow": "Citrate synthase"
+            },
+            {
+              "label": "ציטרט",
+              "sub": "Citrate",
+              "arrow": "Aconitase"
+            },
+            {
+              "label": "איזוציטרט",
+              "sub": "Isocitrate",
+              "arrow": "Isocitrate dehydrogenase"
+            },
+            {
+              "label": "α-קטוגלוטרט",
+              "sub": "α-Ketoglutarate",
+              "arrow": "α-Ketoglutarate dehydrogenase"
+            },
+            {
+              "label": "סוקסיניל-CoA",
+              "sub": "Succinyl-CoA",
+              "arrow": "Succinyl-CoA synthetase"
+            },
+            {
+              "label": "סוקצינט",
+              "sub": "Succinate",
+              "arrow": "Succinate dehydrogenase"
+            },
+            {
+              "label": "פומרט",
+              "sub": "Fumarate",
+              "arrow": "Fumarase"
+            },
+            {
+              "label": "מלאט",
+              "sub": "Malate",
+              "arrow": "Malate dehydrogenase"
+            }
+          ],
+          "note": "שלושת שלבי הבקרה: ציטרט סינתאז, איזוציטרט דהידרוגנאז ו-α-קטוגלוטרט דהידרוגנאז."
+        }
+      ]
+    },
+    {
+      "id": "amino-acids",
+      "title": "חומצות אמינו — מיון והתאמה",
+      "sub": "תרגילים אינטראקטיביים: קבוצות שרשרת צדדית ותכונות ייחודיות",
+      "cards": [
+        {
+          "id": "aa-side-chains",
+          "type": "sort",
+          "prompt": "מיין את 20 חומצות האמינו לפי אופי השרשרת הצדדית",
+          "groups": [
+            {
+              "label": "לא־קוטביות, אליפטיות",
+              "sub": "Nonpolar, aliphatic",
+              "items": [
+                "Gly",
+                "Ala",
+                "Pro",
+                "Val",
+                "Leu",
+                "Ile",
+                "Met"
+              ]
+            },
+            {
+              "label": "ארומטיות",
+              "sub": "Aromatic",
+              "items": [
+                "Phe",
+                "Tyr",
+                "Trp"
+              ]
+            },
+            {
+              "label": "קוטביות, לא טעונות",
+              "sub": "Polar, uncharged",
+              "items": [
+                "Ser",
+                "Thr",
+                "Cys",
+                "Asn",
+                "Gln"
+              ]
+            },
+            {
+              "label": "טעונות חיובית",
+              "sub": "Positively charged (basic)",
+              "items": [
+                "Lys",
+                "Arg",
+                "His"
+              ]
+            },
+            {
+              "label": "טעונות שלילית",
+              "sub": "Negatively charged (acidic)",
+              "items": [
+                "Asp",
+                "Glu"
+              ]
+            }
+          ],
+          "note": "הסיווג של Lehninger. יש ספרים שמסווגים אחרת את גליצין, ציסטאין, טירוזין והיסטידין — והיסטידין טעונה רק חלקית ב-pH 7.4."
+        },
+        {
+          "id": "aa-unique",
+          "type": "sort",
+          "prompt": "התאם כל חומצת אמינו לתכונה הייחודית שלה",
+          "groups": [
+            {
+              "label": "היחידה שאינה כיראלית",
+              "items": [
+                "Gly"
+              ]
+            },
+            {
+              "label": "יוצרת גשרי דיסולפיד",
+              "items": [
+                "Cys"
+              ]
+            },
+            {
+              "label": "האמין שלה סגור בטבעת — שוברת α-הליקס",
+              "items": [
+                "Pro"
+              ]
+            },
+            {
+              "label": "pKa של השרשרת קרוב ל-6 — חומצה/בסיס באתרים פעילים",
+              "items": [
+                "His"
+              ]
+            },
+            {
+              "label": "הבליעה החזקה ביותר ב-280 nm",
+              "items": [
+                "Trp"
+              ]
+            },
+            {
+              "label": "מקודדת על ידי קודון ההתחלה AUG",
+              "items": [
+                "Met"
+              ]
+            }
+          ],
+          "extra": [
+            "Ala",
+            "Leu"
+          ]
         }
       ]
     }

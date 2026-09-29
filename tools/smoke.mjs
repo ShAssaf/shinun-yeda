@@ -14,7 +14,10 @@ const fail = [];
 const html = await readFile(join(ROOT, 'www', 'index.html'), 'utf8');
 
 const vc = new VirtualConsole();
-vc.on('jsdomError', (e) => fail.push('שגיאת JS בטעינה: ' + e.message));
+/* סגירת חלון מפרקת את ה-body, ומשקיף ההיסטוריה של האפליקציה רץ על מסמך
+   שכבר איננו. זה רעש של פירוק הבדיקה, לא תקלה — בדפדפן הדף לא נסגר מתחתיה. */
+let tearingDown = false;
+vc.on('jsdomError', (e) => { if (!tearingDown) fail.push('שגיאת JS בטעינה: ' + e.message); });
 
 const dom = new JSDOM(html, {
   runScripts: 'dangerously',
@@ -68,13 +71,25 @@ for (const deck of DECKS ?? []) {
         break;
       }
       if (!qs?.length) { fail.push(`${deck.id}/${mode.id}: לא נוצרו שאלות`); break; }
-      /* סבב חייב להיות באורך המבוקש כשיש מספיק פריטים */
-      const want = Math.min(12, deck.items.length);
+      /* סבב חייב להיות באורך המבוקש כשיש מספיק פריטים. בנושא, כל מצב
+         שואב ממאגר אחר — כרטיסים, תרגילים או שניהם. */
+      const pool = deck.poolFor ? deck.poolFor(mode.id).length : deck.items.length;
+      const want = Math.min(12, pool);
       if (qs.length < want && mode.id !== 'pair') {
         fail.push(`${deck.id}/${mode.id}: ${qs.length} שאלות במקום ${want}`);
         break;
       }
       for (const q of qs) {
+        if (q.act) {
+          /* תרגיל: כל תשובה שיעד מצפה לה נמצאת בבנק, ויש מה למלא */
+          const texts = q.chips.map((c) => c.text);
+          const need = q.layout.targets.flatMap((t) => t.expect);
+          if (!need.length) { fail.push(`${deck.id}/${mode.id}: תרגיל בלי יעדים`); break; }
+          if (need.some((x) => texts.indexOf(x) < 0)) { fail.push(`${deck.id}/${mode.id}: תשובה חסרה בבנק`); break; }
+          if (new Set(q.chips.map((c) => c.id)).size !== q.chips.length) { fail.push(`${deck.id}/${mode.id}: מזהי פריטים כפולים`); break; }
+          if (!q.label || !q.prompt.main) { fail.push(`${deck.id}/${mode.id}: אין ניסוח לתרגיל`); break; }
+          continue;
+        }
         if (q.options?.length !== 4) { fail.push(`${deck.id}/${mode.id}: ${q.options?.length} אפשרויות במקום 4`); break; }
         if (!q.options.some((o) => o.id === q.answer)) { fail.push(`${deck.id}/${mode.id}: התשובה לא בין האפשרויות`); break; }
         if (new Set(q.options.map((o) => o.id)).size !== 4) { fail.push(`${deck.id}/${mode.id}: אפשרויות כפולות`); break; }
@@ -526,7 +541,13 @@ try {
             if(!t.question || !String(t.question).trim()) bad.push(d.id+'/'+m.id+' שאלה ריקה');
             if(!t.answer   || !String(t.answer).trim())   bad.push(d.id+'/'+m.id+' תשובה ריקה');
             /* התשובה חייבת לזהות את הפריט, לא רק להיות מחרוזת כלשהי */
-            if(q.optionKind === 'pic'){
+            if(q.act){
+              q.layout.targets.forEach(function(tg){
+                tg.expect.forEach(function(x){
+                  if(t.answer.indexOf(x) < 0) bad.push(d.id+'/'+m.id+' הפתרון חסר את '+x);
+                });
+              });
+            } else if(q.optionKind === 'pic'){
               if(!q.prompt.main || t.answer.indexOf(q.prompt.main) < 0)
                 bad.push(d.id+'/'+m.id+' תשובה לא מזהה את המבנה');
             } else if(correct && correct.main){
@@ -787,6 +808,187 @@ try {
   check(big.rejected, 'PDF מעל התקרה לא נדחה בלקוח');
 }
 
+/* 5n — תרגילים אינטראקטיביים: פריסה, שיבוץ, ציון ומאגרי המצבים */
+const ACT_FIXTURES = `
+  var SORT = {id:'s1', type:'sort', prompt:'מיין', groups:[
+    {label:'א', items:['x1','x2']}, {label:'ב', items:['y1']}], extra:['z']};
+  var CYC = {id:'o1', type:'order', cycle:true, prompt:'מעגל', steps:[
+    {label:'A', arrow:'e1'}, {label:'B', arrow:'e2'}, {label:'C', arrow:'e3'}, {label:'D', arrow:'e4'}]};
+  var LIN = {id:'o2', type:'order', prompt:'רצף', ask:'both', steps:[
+    {label:'P', arrow:'NADH'}, {label:'Q', arrow:'NADH'}, {label:'R', given:true, arrow:'x'}, {label:'S'}]};
+  var BIG = {id:'o3', type:'order', cycle:true, prompt:'מעגל גדול', steps:
+    'abcdefghijkl'.split('').map(function(x){ return {label:x}; })};
+  var BROKEN = [{id:'b1', type:'sort', prompt:'', groups:[]},
+                {id:'b2', type:'order', prompt:'x', steps:[{label:'a'}]},
+                {id:'b3', type:'sort', prompt:'x', groups:[{label:'a', items:['1']}]}];
+  var chipOf = function(q, t){ return q.chips.filter(function(c){ return c.text === t; })[0].id; };
+`;
+{
+  const r = JSON.parse(win.eval(`(function(){
+    ${ACT_FIXTURES}
+    const out = {};
+    out.ok = [SORT, CYC, LIN, BIG].map(activityOk);
+    out.broken = BROKEN.map(activityOk);
+
+    /* מעגל בלי עוגן חושף את השלב הראשון; החצים רמז כש-ask=steps */
+    const L = actLayout(CYC);
+    out.cycGiven = L.steps.map(function(s){ return s.given; }).join();
+    out.cycArrows = L.arrows.length;
+    out.cycTargets = L.targets.map(function(t){ return t.id; }).join();
+    /* both: שלבים שאינם גלויים ואז החצים. ברצף יש חץ אחד פחות משלבים */
+    out.linTargets = actLayout(LIN).targets.map(function(t){ return t.id; }).join();
+
+    const key = function(x){ return 't:' + x.id; };
+    const q = activityQuestion(SORT, key);
+    out.chips = q.chips.map(function(c){ return c.text; }).sort().join();
+    placeChip(q, chipOf(q,'x1'), 'g0'); placeChip(q, chipOf(q,'x2'), 'g0'); placeChip(q, chipOf(q,'y1'), 'g1');
+    const g1 = gradeActivity(q);
+    out.perfect = g1.right + '/' + g1.total;
+    /* מסיח שובץ, ופריט עבר לקבוצה הלא נכונה */
+    placeChip(q, chipOf(q,'z'), 'g1'); placeChip(q, chipOf(q,'x2'), 'g1');
+    q.result = gradeActivity(q);
+    out.partial = q.result.right + '/' + q.result.total;
+    out.mistakes = mistakesText(q);
+
+    /* משבצת יחידה מחליפה מקום; נגיעה בפריט שביעד אחר משבצת אליו */
+    const q2 = activityQuestion(LIN, key);
+    const P = chipOf(q2,'P'), Q = chipOf(q2,'Q');
+    placeChip(q2, P, 's0');
+    tapChip(q2, Q);
+    tapChip(q2, P);
+    out.swap = [q2.place[Q] || 'bank', q2.place[P] || 'bank', q2.sel].join();
+    /* שני חצים שמצפים ל-NADH מקבלים כל אחד מהעותקים */
+    const nadh = q2.chips.filter(function(c){ return c.text === 'NADH'; }).map(function(c){ return c.id; });
+    placeChip(q2, nadh[1], 'a0'); placeChip(q2, nadh[0], 'a1');
+    const g3 = gradeActivity(q2);
+    out.nadh = g3.marks[nadh[0]] && g3.marks[nadh[1]];
+
+    out.grades = [gradeOfSet(10,10,20000), gradeOfSet(10,10,80000), gradeOfSet(10,10,200000),
+                  gradeOfSet(8,10,20000), gradeOfSet(5,10,20000), gradeOfSet(0,0,0)].join();
+
+    /* נושא: תרגיל יחיד מספיק; תרגילים פגומים בלבד — לא נכנס */
+    const only = makeDeck({id:'x', kind:'topic', title:'רק תרגיל', data:[SORT]}, 0);
+    out.onlyModes = only.modes.map(function(m){ return m.id; }).join();
+    out.onlyIn = buildDecks([{id:'x', kind:'topic', title:'רק תרגיל', data:[SORT]}]).length;
+    out.junk = buildDecks([{id:'y', kind:'topic', title:'פגום', data:BROKEN}]).length;
+    const mixed = makeDeck({id:'m', kind:'topic', title:'מעורב', data:[
+      {id:'c1',front:'1',back:'a'}, {id:'c2',front:'2',back:'b'}, {id:'c3',front:'3',back:'c'},
+      {id:'c4',front:'4',back:'d'}, SORT, CYC].concat(BROKEN)}, 0);
+    out.mixedModes = mixed.modes.map(function(m){ return m.id; }).join();
+    out.pools = ['f2b','b2f','drill','mix'].map(function(m){ return mixed.poolFor(m).length; }).join();
+    out.kinds = mixed.build('mix', 12).map(function(x){ return x.act ? 'act' : 'mc'; }).sort().join();
+
+    out.solution = [solutionText(SORT), solutionText(CYC)];
+    return JSON.stringify(out);
+  })()`));
+
+  check(r.ok.every(Boolean), 'תרגיל תקין נפסל: ' + JSON.stringify(r.ok));
+  check(r.broken.every((x) => !x), 'תרגיל פגום התקבל: ' + JSON.stringify(r.broken));
+  check(r.cycGiven === 'true,false,false,false', 'מעגל בלי עוגן לא חשף את השלב הראשון');
+  check(r.cycArrows === 4, 'במעגל חסר החץ מהאחרון חזרה לראשון');
+  check(r.cycTargets === 's1,s2,s3', 'ask=steps הפך חצים ליעדים: ' + r.cycTargets);
+  check(r.linTargets === 's0,s1,s3,a0,a1,a2', 'יעדי ask=both שגויים: ' + r.linTargets);
+  check(r.chips === 'x1,x2,y1,z', 'הבנק לא מכיל בדיוק את התשובות והמסיח: ' + r.chips);
+  check(r.perfect === '4/4', 'שיבוץ מושלם לא קיבל ציון מלא: ' + r.perfect);
+  check(r.partial === '2/4', 'ציון חלקי שגוי: ' + r.partial);
+  check(r.mistakes.indexOf('"z"') > -1 && r.mistakes.indexOf('"x2"') > -1, 'תיאור הטעויות חסר: ' + r.mistakes);
+  check(r.swap === 's0,bank,', 'החלפה במשבצת לא עבדה: ' + r.swap);
+  check(r.nadh, 'עותקים זהים לא התקבלו בשני היעדים');
+  check(r.grades === '4,3,2,2,1,1', 'ציוני תרגיל שגויים: ' + r.grades);
+  check(r.onlyModes === 'drill' && r.onlyIn === 1, 'נושא עם תרגיל יחיד לא נכנס לספרייה');
+  check(r.junk === 0, 'נושא שכולו תרגילים פגומים נכנס לספרייה');
+  check(r.mixedModes === 'f2b,b2f,drill,mix', 'מצבי נושא מעורב שגויים: ' + r.mixedModes);
+  check(r.pools === '4,4,2,6', 'מאגרי המצבים שגויים: ' + r.pools);
+  check(r.kinds === 'act,act,mc,mc,mc,mc', 'סבב מעורב לא כלל את כל הסוגים: ' + r.kinds);
+  check(r.solution[0].indexOf('x1') > -1 && r.solution[1].indexOf('D') > -1, 'טקסט הפתרון חסר');
+}
+
+/* 5o — הלוח עצמו: לחיצות אמיתיות, בדיקה, תזמון, ושלושת סוגי הפריסה */
+{
+  const r = JSON.parse(win.eval(`(function(){
+    ${ACT_FIXTURES}
+    const out = {};
+    const deck = makeDeck({id:'ia', kind:'topic', title:'תרגול', data:[SORT, CYC, LIN, BIG]}, 0);
+    let scrolls = 0;
+    window.scrollTo = function(){ scrolls++; };
+    const show = function(item){
+      quiz = {deck:deck, mode:'drill', qs:[activityQuestion(item, deck.keyFn)], i:0, correct:0, misses:[]};
+      renderNow();
+      return quiz.qs[0];
+    };
+    const $ = function(s){ return document.querySelector(s); };
+    const $$ = function(s){ return document.querySelectorAll(s).length; };
+    const chipEl = function(q, t){ return $('[data-chip="'+chipOf(q, t)+'"]'); };
+
+    /* מיון */
+    let q = show(SORT);
+    out.groups = $$('.grp');
+    out.bank = $$('.bank [data-chip]');
+    const before = scrolls;
+    chipEl(q, 'x1').click();
+    out.selected = chipEl(q, 'x1').classList.contains('sel') && $$('.grp.can') === 2;
+    $('.grp[data-zone="g0"] .grp-hd').click();
+    out.placed = !!$('.grp[data-zone="g0"] [data-chip="'+chipOf(q,'x1')+'"]') && q.sel === null;
+    out.keptScroll = scrolls === before;
+    /* נגיעה בפריט שכבר בקבוצה, כשפריט אחר ביד, משבצת לאותה קבוצה */
+    chipEl(q, 'x2').click(); chipEl(q, 'x1').click();
+    chipEl(q, 'y1').click(); $('.grp[data-zone="g1"]').click();
+    out.allPlaced = Object.keys(q.place).length === 3;
+    /* מקלדת עם ספרה לא מפילה תרגיל */
+    document.dispatchEvent(new KeyboardEvent('keydown', {key:'1'}));
+    $('#checkBtn').click();
+    out.feedbackOk = !!$('.feedback.ok') && quiz.correct === 1 && !!$('#nextBtn');
+    out.scheduled = !!cardState('ia:s1');
+    out.frozen = $$('button.chip-a:not(:disabled)') === 0;
+
+    /* מעגל: עיגול עם צמתים, קשתות ומקרא לחצים */
+    q = show(CYC);
+    out.cycle = [$$('.cyc'), $$('.cyc .cn'), $$('.cyc svg > path'), $$('.cyc .given'), $$('.legend-a li')].join();
+    /* הצג תשובה בלי לשבץ דבר — כל יעד מקבל את התיקון שלו */
+    out.reveal = $('#checkBtn').textContent;
+    $('#checkBtn').click();
+    out.fixes = $$('.fix') + '/' + q.layout.targets.length;
+    out.missed = quiz.misses.length === 1 && !!$('.feedback.bad');
+
+    /* רצף לינארי: משבצות חצים בשורות החץ; מעגל גדול נופל לרשימה */
+    q = show(LIN);
+    out.seq = [$$('.seq .st'), $$('.seq .ar .slot'), $$('.seq .given')].join();
+    show(BIG);
+    out.big = $$('.cyc') + ',' + $$('.seq .st');
+
+    /* מסך הסיכום מציג תרגיל שהוחמץ */
+    q = show(LIN);
+    $('#checkBtn').click();
+    quiz.done = true; renderNow();
+    out.results = ($('.miss') || {}).textContent || '';
+
+    /* עיון: פתרון מלא ותגית הסוג */
+    DECKS.push(deck);
+    quiz = null; view = {name:'browse', deck:'ia', q:'', hide:false}; renderNow();
+    out.browse = $$('.bcard') + ',' + ($('.bcard .chip.cat') || {}).textContent;
+    DECKS.pop();
+    view = {name:'home'}; renderNow();
+    return JSON.stringify(out);
+  })()`));
+
+  check(r.groups === 2 && r.bank === 4, `לוח המיון לא נבנה: ${r.groups} קבוצות, ${r.bank} פריטים`);
+  check(r.selected, 'בחירת פריט לא סימנה אותו ואת היעדים');
+  check(r.placed, 'לחיצה על קבוצה לא שיבצה את הפריט שנבחר');
+  check(r.keptScroll, 'שיבוץ בתוך אותה שאלה גולל לראש המסך');
+  check(r.allPlaced, 'שיבוץ דרך פריט שכבר בקבוצה לא עבד');
+  check(r.feedbackOk, 'בדיקה של שיבוץ מושלם לא הציגה הצלחה');
+  check(r.scheduled, 'תרגיל שנבדק לא נרשם בתזמון');
+  check(r.frozen, 'אחרי בדיקה עדיין אפשר להזיז פריטים');
+  check(r.cycle === '1,4,4,1,4', 'ציור המעגל שגוי (מכל,צמתים,קשתות,עוגן,מקרא): ' + r.cycle);
+  check(r.reveal === 'הצג תשובה', 'בלי שיבוץ הכפתור אמור להציע את התשובה');
+  check(r.fixes === '3/3', 'לא כל יעד קיבל תיקון: ' + r.fixes);
+  check(r.missed, 'תרגיל שגוי לא נרשם כהחמצה');
+  check(r.seq === '4,3,1', 'ציור הרצף שגוי (שלבים,משבצות חץ,גלויים): ' + r.seq);
+  check(r.big === '0,12', 'מעגל גדול לא נפל לרשימה: ' + r.big);
+  check(r.results.indexOf('במקום הנכון') > -1, 'מסך הסיכום לא מציג תרגיל שהוחמץ');
+  check(r.browse === '4,מיון', 'העיון לא מציג תרגילים: ' + r.browse);
+}
+
 /* 5r — כפתור אחורה של המכשיר חוזר מסך אחד, ויוצא רק ממסך הבית */
 try {
   /* בלי רשומה לחזור אליה אין popstate — לא ממתינים לנצח */
@@ -859,7 +1061,10 @@ try {
     check(!!d.querySelector('#lockGoogle'), 'אין כפתור התחברות עם גוגל');
     check(!d.querySelector('.deck-list'), 'התוכן דלף אל מסך הנעילה');
   }
+  tearingDown = true;
   locked.window.close();
+  await new Promise((r) => setTimeout(r, 0));
+  tearingDown = false;
 }
 
 /* ה-SW מטפל רק בקבצי האפליקציה. קריאה ל-Supabase שעברה בו נשמרה
