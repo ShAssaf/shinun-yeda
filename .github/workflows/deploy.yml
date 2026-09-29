@@ -3,6 +3,10 @@ name: build & deploy
 on:
   push:
     branches: [main]
+  # PR נבנה ונבדק לפני המיזוג, ולא מדפלוי. בלי זה תקלה מתגלה רק אחרי
+  # שהיא כבר ב-main.
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -10,8 +14,9 @@ permissions:
   pages: write
   id-token: write
 
+# לכל PR קבוצה משלו — ריצת PR לא תבטל דיפלוי שרץ ב-main
 concurrency:
-  group: pages
+  group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.ref) || 'pages' }}
   cancel-in-progress: true
 
 jobs:
@@ -40,13 +45,16 @@ jobs:
         run: node tools/smoke.mjs
 
       - uses: actions/configure-pages@v5
+        if: github.event_name != 'pull_request'
 
       - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request'
         with:
           path: www
 
   deploy:
     needs: build
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
