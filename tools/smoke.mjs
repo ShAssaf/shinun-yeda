@@ -787,6 +787,57 @@ try {
   check(big.rejected, 'PDF מעל התקרה לא נדחה בלקוח');
 }
 
+/* 5r — כפתור אחורה של המכשיר חוזר מסך אחד, ויוצא רק ממסך הבית */
+try {
+  /* בלי רשומה לחזור אליה אין popstate — לא ממתינים לנצח */
+  const popped = () => new Promise((r) => {
+    win.addEventListener('popstate', () => setTimeout(r, 0), { once: true });
+    setTimeout(r, 300);
+  });
+  const settle = () => new Promise((r) => setTimeout(r, 30));
+  const at = () => JSON.parse(win.eval(`JSON.stringify({
+    name: quiz ? 'quiz' : view.name, deck: view.deck || null,
+    guard: !!(history.state && history.state.shinun), len: history.length,
+    sheet: !!document.querySelector('.sheet-bg') })`));
+
+  /* בדיקות קודמות ריקנו את הספרייה */
+  win.eval(`LIB.status='ok'; LIB.rows=localRows(); applyRows(); quiz=null; view={name:'home'}; renderNow();`);
+  await settle();
+  const base = at();
+  check(!base.guard, 'במסך הבית נשארה רשומת היסטוריה — אחורה לא יצא');
+
+  const first = win.eval('DECKS[0].id'), id = JSON.stringify(first);
+  win.eval(`view={name:'deck', deck:${id}}; renderNow();`);
+  check(at().guard, 'מעבר לחבילה לא הוסיף רשומת היסטוריה');
+  win.eval(`view={name:'browse', deck:${id}, q:'', hide:false}; renderNow();`);
+  check(at().len <= 2, 'כל מסך הוסיף רשומה משלו במקום שומר אחד');
+
+  let p = popped(); win.history.back(); await p;
+  let s = at();
+  check(s.name === 'deck' && s.deck === first, `אחורה מעיון הגיע ל-${s.name} במקום לחבילה`);
+  check(s.guard, 'אחרי חזרה לחבילה אין שומר — הלחיצה הבאה תצא');
+
+  p = popped(); win.history.back(); await p;
+  s = at();
+  check(s.name === 'home' && !s.guard, `אחורה מחבילה הגיע ל-${s.name} במקום לבית`);
+
+  /* סבב כללי: כפתור הבית בחידון שלח לחבילה 'all' שאינה קיימת, ונפל */
+  win.eval(`startMixed(); renderNow(); document.getElementById('homeBtn').click();`);
+  await settle();
+  s = at();
+  check(s.name === 'home' && !s.guard, `יציאה מסבב כללי הגיעה ל-${s.name}`);
+
+  win.eval(`openExamSheet();`);
+  await settle();
+  check(at().guard, 'גיליון פתוח לא הוסיף רשומת היסטוריה');
+  p = popped(); win.history.back(); await p;
+  s = at();
+  check(!s.sheet && s.name === 'home', 'אחורה לא סגר את הגיליון');
+  check(s.len <= 2, `ההיסטוריה גדלה ל-${s.len} אחרי סבב שלם`);
+} catch (e) {
+  fail.push('כפתור אחורה נפל: ' + e.message);
+}
+
 /* 6 — בלי מפגש שמור, מסך הנעילה מופיע ושום דבר אחר לא */
 {
   const locked = new JSDOM(html, {
