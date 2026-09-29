@@ -104,10 +104,76 @@ function validateItem(deck: DeckKey, item: Record<string, unknown>, i: number, e
     isMolecule(item.A, `${path}.A`, errs);
     isMolecule(item.B, `${path}.B`, errs);
   } else if (deck === 'topics') {
-    /* כרטיס בנושא חופשי: מושג מול הסבר */
-    str(item, 'front', path, errs);
-    str(item, 'back', path, errs);
+    if (item.type !== undefined) validateActivity(item, path, errs);
+    else {
+      /* כרטיס בנושא חופשי: מושג מול הסבר */
+      str(item, 'front', path, errs);
+      str(item, 'back', path, errs);
+    }
   }
+}
+
+/* ---------- תרגילים אינטראקטיביים ----------
+   הלקוח מסנן תרגיל פגום בשקט; כאן נכשלים בקול, כדי ש-Claude יתקן. */
+const ACT_TYPES = ['sort', 'order'];
+const ACT_ASK = ['steps', 'arrows', 'both'];
+
+function texts(v: unknown): string[] | null {
+  if (!Array.isArray(v)) return null;
+  return v.every((x) => typeof x === 'string' && x.trim()) ? (v as string[]).map((x) => x.trim()) : null;
+}
+
+function validateActivity(item: Record<string, unknown>, path: string, errs: string[]) {
+  if (!ACT_TYPES.includes(item.type as string)) {
+    errs.push(`${path}.type חייב להיות אחד מ-${ACT_TYPES} או לא להופיע בכלל`); return;
+  }
+  str(item, 'prompt', path, errs);
+  const extra = item.extra === undefined ? [] : texts(item.extra);
+  if (!extra) { errs.push(`${path}.extra חייב להיות מערך מחרוזות`); return; }
+  if (extra.length > 6) errs.push(`${path}.extra — עד 6 מסיחים`);
+  const answers: string[] = [];
+
+  if (item.type === 'sort') {
+    const groups = item.groups;
+    if (!Array.isArray(groups) || groups.length < 2 || groups.length > 8) {
+      errs.push(`${path}.groups — בין 2 ל-8 קבוצות`); return;
+    }
+    groups.forEach((g, j) => {
+      const grp = g as Record<string, unknown>;
+      str(grp, 'label', `${path}.groups[${j}]`, errs);
+      const items = texts(grp?.items);
+      if (!items || !items.length) errs.push(`${path}.groups[${j}].items — לפחות פריט אחד`);
+      else answers.push(...items);
+    });
+    if (answers.length > 30) errs.push(`${path}: יותר מ-30 פריטים למיון`);
+    const dup = answers.find((x, i) => answers.indexOf(x) !== i);
+    if (dup) errs.push(`${path}: "${dup}" מופיע ביותר מקבוצה אחת. פריט ששייך לשתיים — קבוצה נפרדת`);
+  } else {
+    const steps = item.steps;
+    if (!Array.isArray(steps) || steps.length < 3 || steps.length > 12) {
+      errs.push(`${path}.steps — בין 3 ל-12 שלבים`); return;
+    }
+    const ask = item.ask === undefined ? 'steps' : item.ask as string;
+    if (!ACT_ASK.includes(ask)) errs.push(`${path}.ask חייב אחד מ-${ACT_ASK}`);
+    if (item.cycle !== undefined && typeof item.cycle !== 'boolean') errs.push(`${path}.cycle חייב true/false`);
+    const arrowsNeeded = item.cycle ? steps.length : steps.length - 1;
+    let blanks = 0;
+    steps.forEach((st, j) => {
+      const s = st as Record<string, unknown>;
+      const sp = `${path}.steps[${j}]`;
+      str(s, 'label', sp, errs);
+      if (s?.arrow !== undefined && typeof s.arrow !== 'string') errs.push(`${sp}.arrow חייב מחרוזת`);
+      if (ask !== 'arrows' && !s?.given) { blanks++; answers.push(String(s?.label ?? '').trim()); }
+      if (ask !== 'steps' && j < arrowsNeeded) {
+        if (typeof s?.arrow !== 'string' || !s.arrow.trim())
+          errs.push(`${sp}.arrow חסר — ב-ask=${ask} צריך טקסט על כל חץ`);
+        else { blanks++; answers.push(s.arrow.trim()); }
+      }
+    });
+    if (blanks < 2) errs.push(`${path}: צריך לפחות שני מקומות למילוי`);
+  }
+  for (const x of extra)
+    if (answers.includes(x)) errs.push(`${path}.extra: "${x}" הוא גם תשובה`);
 }
 
 const MAX_CARDS = 200;
@@ -223,6 +289,34 @@ topic — נושא חופשי. מקטע "items", כרטיסים:
   של התא, מסלולים מטבוליים, אנזימולוגיה, פרמקולוגיה, ויטמינים, הכול.
   אל תסרב בטענה שאין נושא מתאים. אם אין — target="new_topic" ותיצור אחד.
 
+תרגילים אינטראקטיביים — באותו מקטע "items" של נושא topic, לצד הכרטיסים. המשתמש
+מקבל בנק תשובות ומשבץ כל פריט במקומו (הקשה או גרירה). פריט עם type הוא תרגיל:
+
+sort — מיון מבנק תשובות לקבוצות. גם התאמה אחד־לאחד: קבוצה עם פריט יחיד.
+  {"id","type":"sort","prompt","groups":[{"label","sub"?,"items":["..."]}],"extra"?:["..."],"note"?}
+  - מתאים לסיווג: חומצות אמינו לפי שרשרת צדדית, ויטמינים מסיסי שומן/מים,
+    אנזים לאברון, תרופה למנגנון. ולהתאמה: מחלה↔אנזים חסר, ויטמין↔קו־אנזים.
+  - כל פריט בקבוצה אחת בלבד. פריט ששייך לשתיים — קבוצה נפרדת ("גם וגם").
+  - 2–8 קבוצות, עד 30 פריטים. פריטים קצרים — מילה עד ארבע מילים.
+  - extra: מסיחים שלא שייכים לשום קבוצה, עד 6, רשות. לא אחד מהפריטים.
+
+order — סידור ברצף, או השלמת מעגל כש-"cycle":true. מסלולים מטבוליים, מפלי
+  קרישה ואיתות, שלבי מחזור התא.
+  {"id","type":"order","prompt","cycle"?:bool,"ask"?:"steps"|"arrows"|"both",
+   "steps":[{"label","sub"?,"arrow"?,"given"?}],"extra"?:[...],"note"?}
+  - steps בסדר הנכון. arrow = מה שכתוב על החץ שיוצא מהשלב אל הבא — אנזים,
+    קו־פקטור, תוצר לוואי. במעגל, החץ של השלב האחרון חוזר לראשון.
+  - ask קובע מה ממלאים: steps (ברירת מחדל) — את השלבים, והחיצים מוצגים כרמז;
+    arrows — השלבים גלויים ומשבצים את מה שעל החיצים (למשל "שבץ את האנזימים");
+    both — את שניהם. ב-arrows וב-both כל חץ חייב טקסט.
+  - given:true משאיר שלב גלוי כעוגן. במעגל בלי עוגן השלב הראשון מוצג.
+  - 3–12 שלבים. מעגל עד 10 שלבים מצויר כעיגול, מעבר לזה כרשימה.
+  - שני חיצים יכולים לשאת אותו טקסט (NADH) — כל עותק יתקבל בכל אחד מהם.
+
+מתי תרגיל ומתי כרטיס: כשמבקשים "שאלה אינטראקטיבית", "גרירה", "שיבוץ", "מיון",
+"התאמה", "סדר את", "השלם את המעגל/המסלול" — תרגיל. כשהחומר הוא רשימה שמתחלקת
+לקטגוריות או רצף שלבים, הצע תרגיל גם בלי שביקשו. id של תרגיל ייחודי כמו של כרטיס.
+
 כללי ציור מולקולות:
 - הרשת ביחידות של 1. קשר טיפוסי באורך 1 עד 1.5. תוויות ארוכות (CH₂OH) דורשות מרווח 1.5.
 - x גדל ימינה, y גדל למטה.
@@ -241,7 +335,8 @@ topic — נושא חופשי. מקטע "items", כרטיסים:
   מתקן פריט קיים, ואז mode="replace" ואותו id.
 - טקסט למשתמש בעברית. שמות ומונחים לועזיים נשארים בלועזית.
 - דיוק מדעי קודם לכל. בקשה שגויה עובדתית — תקן וציין זאת ב-summary.
-- נושא חדש חייב ארבעה פריטים לפחות, אחרת אי אפשר לייצר ארבע אפשרויות.
+- נושא חדש חייב ארבעה כרטיסים לפחות (אחרת אי אפשר לייצר ארבע אפשרויות),
+  או תרגיל אינטראקטיבי אחד לפחות — תרגיל עומד לבד.
 - אם הבקשה אינה ברורה, החזר items ריק והסבר ב-summary.`;
 
 const TOOL: Anthropic.Tool = {
@@ -500,7 +595,9 @@ Deno.serve(async (req) => {
     if (patch.target === 'new_topic') {
       const errs: string[] = [];
       items.forEach((it, i) => validateItem('topics', it, i, errs));
-      if (items.length < 4) errs.push('נושא חדש דורש ארבעה פריטים לפחות');
+      /* כרטיסים צריכים שלושה מסיחים זה מזה; תרגיל עומד לבד */
+      const acts = items.filter((it) => it.type !== undefined).length;
+      if (!acts && items.length < 4) errs.push('נושא חדש דורש ארבעה כרטיסים לפחות, או תרגיל אינטראקטיבי');
       const ids = new Set<string>();
       items.forEach((it) => {
         if (ids.has(it.id as string)) errs.push(`המזהה ${it.id} מופיע פעמיים`);

@@ -222,6 +222,92 @@ h1{
 .feedback .fb-txt b.ltr{direction:ltr;unicode-bidi:isolate}
 .next{background:var(--ink);color:var(--bg);border-radius:9px;padding:8px 16px;font-size:14px;font-weight:500;flex:none}
 
+/* ---------- תרגילים אינטראקטיביים ---------- */
+.stage.slim{min-height:0;padding:14px}
+.stage.slim .q-text{max-width:none}
+.stage.slim .q-text b{font-size:clamp(19px,5.4vw,24px);line-height:1.35}
+.stage.slim .q-text span{font-size:13.5px;margin-top:6px}
+.board{display:flex;flex-direction:column;gap:12px}
+.bank{
+  background:var(--surface);border:1.5px dashed var(--line-2);border-radius:14px;padding:10px;
+  display:flex;flex-direction:column;gap:8px;transition:border-color .15s;
+  position:sticky;top:6px;z-index:5;box-shadow:0 6px 16px -10px rgba(0,0,0,.35);
+}
+.bank.empty,.bank.done{position:static;box-shadow:none}
+.zone-hd{font-size:12px;color:var(--ink-2);line-height:1.4}
+.chips-a{display:flex;flex-wrap:wrap;gap:6px;min-height:34px;align-content:flex-start}
+.chip-a{
+  border:1.5px solid var(--line-2);background:var(--surface);border-radius:99px;
+  padding:6px 12px;font-size:14px;font-weight:500;line-height:1.3;max-width:100%;
+  overflow-wrap:anywhere;touch-action:manipulation;-webkit-user-select:none;user-select:none;
+  transition:border-color .12s,background .12s,transform .08s;
+}
+.chip-a:not(:disabled):hover{border-color:var(--accent)}
+.chip-a:not(:disabled):active{transform:scale(.97)}
+.chip-a.sel{border-color:var(--accent);background:var(--accent);color:var(--on-accent)}
+.chip-a.ok{border-color:var(--ok);background:var(--ok-bg);color:var(--ok)}
+.chip-a.bad{border-color:var(--bad);background:var(--bad-bg);color:var(--bad);text-decoration:line-through}
+.chip-a.ghost{border-style:dashed;border-color:var(--ok);background:transparent;color:var(--ok)}
+.chip-a.miss{opacity:.45}
+.nb{white-space:nowrap}
+.chip-a:disabled{cursor:default}
+.chip-a.drag{opacity:.35}
+.bank.can,.grp.can,.slot.can{border-color:var(--accent)}
+.grp.can,.slot.can{background:color-mix(in srgb, var(--accent) 7%, var(--surface))}
+.groups{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+@media (max-width:330px){.groups{grid-template-columns:1fr}}
+.grp{
+  background:var(--surface);border:1.5px solid var(--line);border-radius:13px;padding:9px;
+  display:flex;flex-direction:column;gap:7px;transition:border-color .15s,background .15s;
+}
+.grp-hd{text-align:right;font-size:14px;font-weight:600;line-height:1.35}
+.grp-hd small{display:block;font-size:11.5px;font-weight:400;color:var(--ink-2);direction:ltr;text-align:right}
+.slot{
+  min-height:40px;border:1.5px dashed var(--line-2);border-radius:11px;background:var(--bg);
+  display:flex;align-items:stretch;padding:3px;transition:border-color .15s,background .15s;
+}
+.slot .chip-a{flex:1;border-radius:9px;text-align:center}
+.hole{flex:1;min-height:32px;border-radius:9px}
+.given{
+  background:var(--surface-2);border:1px solid var(--line);border-radius:11px;
+  padding:8px 11px;font-size:14px;font-weight:500;line-height:1.35;text-align:center;
+}
+.fix{display:block;font-size:12px;color:var(--ok);text-align:center;line-height:1.35}
+.fix::before{content:"✓ "}
+.cell{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.seq{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.seq .st{display:flex;align-items:center;gap:9px}
+.seq .num{
+  font-family:"IBM Plex Sans",sans-serif;font-size:11px;color:var(--ink-2);
+  width:20px;flex:none;text-align:center;font-variant-numeric:tabular-nums;
+}
+.seq .ar{display:flex;align-items:center;gap:9px;padding:4px 0;font-size:12.5px;color:var(--ink-2)}
+.seq .ar-glyph{width:20px;flex:none;text-align:center;font-size:15px;color:var(--line-2)}
+.seq .ar .slot{min-height:34px}
+.seq .ar .chip-a{font-size:13px;padding:4px 10px}
+.cyc{position:relative;width:100%;max-width:400px;margin:0 auto;aspect-ratio:100/125}
+.cyc > svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.cyc .cn{
+  position:absolute;width:25%;transform:translate(-50%,-50%);
+  display:flex;flex-direction:column;gap:2px;
+}
+.cyc .given,.cyc .chip-a{font-size:12.5px;padding:6px 4px;text-align:center}
+.cyc .given{background:var(--surface-2)}
+.cyc .slot{background:var(--surface)}
+.cyc .fix{font-size:11px}
+.legend-a{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.legend-a li{display:flex;align-items:center;gap:9px;font-size:13.5px;line-height:1.4}
+.legend-a .slot{min-height:34px}
+.legend-a .chip-a{font-size:13px;padding:4px 10px}
+.badge{
+  width:22px;height:22px;border-radius:99px;flex:none;display:grid;place-items:center;
+  background:var(--surface);border:1px solid var(--line-2);color:var(--ink-2);
+  font-family:"IBM Plex Sans",sans-serif;font-size:11px;font-weight:600;
+}
+.act-foot{display:flex;align-items:center;gap:10px}
+.act-foot .btn{flex:1}
+.act-foot span{font-size:12.5px;color:var(--ink-2);flex:none}
+
 /* ---------- results ---------- */
 .results{flex:1;display:flex;flex-direction:column;gap:18px;padding:22px 0 8px}
 .score-big{text-align:center}
@@ -572,9 +658,13 @@ h1{
 .bcard .sub{font-size:12.5px;color:var(--ink-2);margin-top:1px;direction:ltr;text-align:right}
 .bcard .body{font-size:14px;line-height:1.55;margin-top:7px}
 .bcard .body.blur{filter:blur(5px);user-select:none;cursor:pointer}
+.bcard .blist{margin:7px 0 0;padding:0 18px 0 0;font-size:13.5px;line-height:1.65}
+.bcard ul.blist{list-style:none;padding:0}
+.bcard .blist b{font-weight:600}
+.bcard .blist .via{color:var(--ink-2);font-size:12.5px}
 .bcard .note{
   font-family:"IBM Plex Sans",sans-serif;font-size:11.5px;color:var(--accent);
-  margin-top:5px;direction:ltr;text-align:right;
+  margin-top:5px;unicode-bidi:plaintext;text-align:right;
 }
 .bcard .row{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;align-items:center}
 .chip{
@@ -886,6 +976,17 @@ function gradeOf(correct, ms){
   if(!correct) return 1;
   if(ms > 12000) return 2;
   if(ms < 4000)  return 4;
+  return 3;
+}
+
+/* ציון לתרגיל שיבוץ: קודם שלמות, ואז מהירות לכל פריט. שתי טעויות
+   מתוך עשרה הן "נזכרתי בקושי", לא "שכחתי". */
+function gradeOfSet(right, total, ms){
+  if(!total) return 1;
+  if(right < total) return right / total >= 0.8 ? 2 : 1;
+  const per = ms / total;
+  if(per > 15000) return 2;
+  if(per < 4000)  return 4;
   return 3;
 }
 
@@ -1235,9 +1336,8 @@ function dLegend(deck, colors){
 /* ===========================================================
    מנוע חבילות הנושא — כרטיס {id, front, frontSub, back, note}
    =========================================================== */
-function topicQuestion(cards, key, mode){
-  const card = topicQuestion.pool.shift();
-  const dir  = mode==='mix' ? (Math.random()<0.5?'f2b':'b2f') : mode;
+function topicQuestion(cards, key, mode, card){
+  const dir  = mode==='f2b' || mode==='b2f' ? mode : (Math.random()<0.5?'f2b':'b2f');
   const foils = sample(cards.filter(function(c){ return c.id!==card.id; }), 3);
   const opts = shuffle([card].concat(foils));
   const ckey = key(card);
@@ -1254,6 +1354,167 @@ function topicQuestion(cards, key, mode){
     optionKind:'text',
     options:opts.map(function(o){ return {id:o.id, main:o.back}; }),
     answer:card.id, why:card.note||null };
+}
+
+/* ===========================================================
+   תרגילים אינטראקטיביים — פריט בנושא שיש לו type. משבצים פריטים
+   מבנק תשובות אל יעדים, בהקשה או בגרירה.
+     sort   מיון לקבוצות. גם התאמה אחד־לאחד: קבוצה עם פריט יחיד.
+            {id, type:'sort', prompt, groups:[{label, sub, items:[..]}], extra:[..], note}
+     order  רצף, או מעגל כש-cycle. arrow = מה שכתוב על החץ שיוצא מהשלב
+            אל הבא; במעגל החץ של האחרון חוזר לראשון. ask קובע מה ממלאים:
+            steps (ברירת מחדל) · arrows · both. given משאיר שלב גלוי.
+            {id, type:'order', prompt, cycle, ask, steps:[{label, sub, arrow, given}], extra, note}
+   extra = מסיחים שלא שייכים לשום יעד. כל תרגיל הוא כרטיס אחד בתזמון.
+   ההשוואה לפי טקסט, כך ששני חיצים שמצפים ל-NADH מקבלים כל עותק.
+   =========================================================== */
+const ACT_TYPES = ['sort', 'order'];
+const ACT_ASK = ['steps', 'arrows', 'both'];
+const CYCLE_MAX = 10;        /* מעבר לזה העיגול צפוף מדי, ומציירים רשימה */
+
+function clean(s){ return typeof s === 'string' ? s.trim() : ''; }
+function isActivity(it){ return !!it && ACT_TYPES.indexOf(it.type) > -1; }
+function actName(it){ return it.type === 'sort' ? 'מיון' : it.cycle ? 'מעגל' : 'רצף'; }
+
+/* מה מוצג ומה יש למלא. יעד = כל מה שאינו גלוי ויש לו תשובה. */
+function actLayout(it){
+  if(it.type === 'sort'){
+    const groups = (Array.isArray(it.groups) ? it.groups : []).map(function(g, i){
+      g = g || {};
+      return {id:'g'+i, kind:'group', i:i, label:clean(g.label), sub:clean(g.sub),
+              expect:(Array.isArray(g.items) ? g.items : []).map(clean).filter(Boolean)};
+    });
+    return {groups:groups, targets:groups};
+  }
+  const raw = Array.isArray(it.steps) ? it.steps : [];
+  const ask = ACT_ASK.indexOf(it.ask) > -1 ? it.ask : 'steps';
+  const anchored = raw.some(function(s){ return s && s.given; });
+  const steps = raw.map(function(s, i){
+    s = s || {};
+    /* מעגל בלי עוגן אין לו התחלה — השלב הראשון נחשף */
+    const shown = ask === 'arrows' || !!s.given || (!!it.cycle && !anchored && i === 0);
+    return {id:'s'+i, kind:'step', i:i, label:clean(s.label), sub:clean(s.sub),
+            expect:clean(s.label) ? [clean(s.label)] : [], given:shown};
+  });
+  const arrows = [];
+  const count = it.cycle ? raw.length : raw.length - 1;
+  for(let i=0;i<count;i++){
+    const a = clean((raw[i] || {}).arrow);
+    arrows.push({id:'a'+i, kind:'arrow', i:i, label:a, expect:a ? [a] : [],
+                 given: ask === 'steps' || !a});
+  }
+  return {steps:steps, arrows:arrows,
+          targets:steps.concat(arrows).filter(function(t){ return !t.given && t.expect.length; })};
+}
+
+/* תוכן מהשרת עלול להיות חלקי. תרגיל פגום יוצא מהסבב במקום להפיל אותו. */
+function activityOk(it){
+  if(!isActivity(it) || !clean(it.prompt)) return false;
+  const L = actLayout(it);
+  if(it.type === 'sort')
+    return L.groups.length >= 2 && L.groups.every(function(g){ return g.label && g.expect.length; });
+  return L.steps.length >= 3 && L.steps.every(function(s){ return s.label; }) && L.targets.length >= 2;
+}
+
+/* הפתרון המלא כטקסט — לעיון ולשאלת «למה» */
+function solutionText(it){
+  const L = actLayout(it);
+  if(it.type === 'sort')
+    return L.groups.map(function(g){ return g.label + ': ' + g.expect.join(', '); }).join(' · ');
+  const parts = L.steps.map(function(s, i){
+    const a = L.arrows[i];
+    return (i+1) + '. ' + s.label + (a && a.label ? ' (' + a.label + ')' : '');
+  });
+  return parts.join(' ← ') + (it.cycle ? ' ← חזרה לשלב 1' : '');
+}
+
+/* אותו פתרון כשורות, לעיון. טקסט אחד ארוך שמערבב עברית ולטינית
+   מתפרק בכיווניות; שורה לכל קבוצה או שלב נשארת קריאה. */
+function solutionRows(it){
+  const L = actLayout(it);
+  if(it.type === 'sort')
+    return L.groups.map(function(g){ return {head:g.label, text:g.expect.join(', ')}; });
+  return L.steps.map(function(s, i){
+    const a = L.arrows[i];
+    return {head:s.label, text:a && a.label ? '← ' + a.label : ''};
+  });
+}
+
+function activityQuestion(it, key){
+  const L = actLayout(it);
+  const texts = [];
+  L.targets.forEach(function(t){ t.expect.forEach(function(x){ texts.push(x); }); });
+  const extra = (Array.isArray(it.extra) ? it.extra : []).map(clean).filter(Boolean);
+  return {
+    key:key(it), act:it, layout:L,
+    label: it.type === 'sort' ? 'מיון לקבוצות' : it.cycle ? 'השלמת המעגל' : 'סידור לפי הסדר',
+    prompt:{kind:'text', main:clean(it.prompt),
+            sub: extra.length ? 'חלק מהפריטים לא שייכים לשום מקום — השאר אותם בבנק' : ''},
+    chips: shuffle(texts.concat(extra)).map(function(x, i){ return {id:'c'+i, text:x}; }),
+    place:{}, sel:null,
+    options:[], answer:null, why:clean(it.note) || null
+  };
+}
+
+function targetOf(q, id){
+  return id ? q.layout.targets.filter(function(t){ return t.id === id; })[0] || null : null;
+}
+function chipsIn(q, zone){
+  return q.chips.filter(function(c){ return (q.place[c.id] || null) === zone; });
+}
+
+/* zone: מזהה יעד, או null לבנק. משבצת של פריט יחיד מחליפה מקום עם מי שבה. */
+function placeChip(q, chipId, zone){
+  const t = targetOf(q, zone);
+  if(zone && !t) return;
+  const from = q.place[chipId] || null;
+  if(t && t.kind !== 'group'){
+    chipsIn(q, zone).forEach(function(c){
+      if(c.id === chipId) return;
+      if(from) q.place[c.id] = from; else delete q.place[c.id];
+    });
+  }
+  if(zone) q.place[chipId] = zone; else delete q.place[chipId];
+  q.sel = null;
+}
+/* נגיעה בפריט שכבר יושב ביעד אחר = נגיעה ביעד עצמו. אחרת בוחרים בו. */
+function tapChip(q, chipId){
+  const zone = q.place[chipId] || null;
+  if(q.sel && q.sel !== chipId && zone && zone !== (q.place[q.sel] || null)){
+    placeChip(q, q.sel, zone);
+    return;
+  }
+  q.sel = q.sel === chipId ? null : chipId;
+}
+function tapZone(q, zone){ if(q.sel) placeChip(q, q.sel, zone); }
+
+/* נכון = היעד מצפה לטקסט הזה, או מסיח שנשאר בבנק */
+function gradeActivity(q){
+  const wanted = {};
+  q.layout.targets.forEach(function(t){ t.expect.forEach(function(x){ wanted[x] = true; }); });
+  const marks = {};
+  let right = 0;
+  q.chips.forEach(function(c){
+    const t = targetOf(q, q.place[c.id]);
+    const ok = t ? t.expect.indexOf(c.text) > -1 : !wanted[c.text];
+    marks[c.id] = ok;
+    if(ok) right++;
+  });
+  return {right:right, total:q.chips.length, marks:marks};
+}
+
+function mistakesText(q){
+  if(!q.result) return '';
+  const out = [];
+  q.chips.forEach(function(c){
+    if(q.result.marks[c.id]) return;
+    const t = targetOf(q, q.place[c.id]);
+    if(!t)                    out.push('"'+c.text+'" נשאר בבנק');
+    else if(t.kind==='group') out.push('"'+c.text+'" שובץ ב"'+t.label+'"');
+    else if(t.kind==='step')  out.push('"'+c.text+'" שובץ כשלב '+(t.i+1));
+    else                      out.push('"'+c.text+'" שובץ על החץ שאחרי שלב '+(t.i+1));
+  });
+  return out.slice(0, 8).join(' · ');
 }
 
 /* ===========================================================
@@ -1663,31 +1924,56 @@ function makeDeck(row, idx){
       } };
   }
 
-  /* topic — המנוע הגנרי */
-  const cards = Array.isArray(row.data) ? row.data : (row.data.cards || []);
+  /* topic — המנוע הגנרי. כרטיסים ותרגילים חיים באותו מערך. כרטיסים
+     נכנסים לסבב רק מארבעה ומעלה, כי צריך שלושה מסיחים; תרגיל עומד לבד. */
+  const all   = Array.isArray(row.data) ? row.data : (row.data.cards || []);
+  const acts  = all.filter(activityOk);
+  const found = all.filter(function(c){ return c && !c.type; });
+  const cards = found.length >= 4 ? found : [];
   const color = row.color || TOPIC_COLORS[idx % TOPIC_COLORS.length];
-  return { id:row.id, row:row, title:row.title, sub:row.subtitle || (cards.length+' כרטיסים'),
-    color:color, items:cards, keyFn:key,
-    browse:function(c){ return {title:c.front, sub:c.frontSub, body:c.back, note:c.note}; },
-    modes:[
-      {id:'f2b', glyph:'→', title:'מושג ← הסבר', desc:'רואה מושג, בוחר את ההסבר'},
-      {id:'b2f', glyph:'←', title:'הסבר ← מושג', desc:'רואה הסבר, בוחר את המושג'},
-      {id:'mix', glyph:'⇄', title:'מעורב', desc:'שני הכיוונים באקראי'},
-    ],
+  const modes = [];
+  if(cards.length) modes.push(
+    {id:'f2b', glyph:'→', title:'מושג ← הסבר', desc:'רואה מושג, בוחר את ההסבר'},
+    {id:'b2f', glyph:'←', title:'הסבר ← מושג', desc:'רואה הסבר, בוחר את המושג'});
+  if(acts.length) modes.push(
+    {id:'drill', glyph:'⊞', title:'תרגול אינטראקטיבי',
+     desc: acts.length + ' תרגילי ' + acts.map(actName).filter(function(x, i, a){
+       return a.indexOf(x) === i; }).join(', ') + ' מבנק תשובות'});
+  if(cards.length) modes.push(
+    {id:'mix', glyph:'⇄', title:'מעורב',
+     desc: acts.length ? 'כרטיסים ותרגילים יחד' : 'שני הכיוונים באקראי'});
+  const poolFor = function(mode){
+    if(mode === 'f2b' || mode === 'b2f') return cards;
+    if(mode === 'drill') return acts;
+    return cards.concat(acts);
+  };
+  const counts = [cards.length && cards.length + ' כרטיסים', acts.length && acts.length + ' תרגילים'];
+  return { id:row.id, row:row, title:row.title,
+    sub:row.subtitle || counts.filter(Boolean).join(' · '),
+    color:color, items:cards.concat(acts), keyFn:key, min:1, poolFor:poolFor,
+    browse:function(c){
+      if(isActivity(c)) return {title:c.prompt, rows:solutionRows(c), ordered:c.type === 'order',
+                                note:c.note, tag:actName(c), tagColor:'var(--accent)'};
+      return {title:c.front, sub:c.frontSub, body:c.back, note:c.note};
+    },
+    modes:modes,
     legend:[{color:color, he:row.title}],
     build:function(mode, n){
-      const count = Math.min(n || ROUND, cards.length);
-      topicQuestion.pool = pickWeighted(cards, count, key);
-      const out=[]; for(let k=0;k<count;k++) out.push(topicQuestion(cards, key, mode));
-      return out;
+      const pool = poolFor(mode);
+      return pickWeighted(pool, Math.min(n || ROUND, pool.length), key).map(function(it){
+        return isActivity(it) ? activityQuestion(it, key) : topicQuestion(cards, key, mode, it);
+      });
     } };
 }
 
-/* חבילה צריכה ארבעה פריטים לפחות כדי לייצר ארבע אפשרויות */
+/* חבילה צריכה ארבעה פריטים לפחות כדי לייצר ארבע אפשרויות. נושא מסנן
+   בעצמו ומסמן min:1, כי תרגיל אחד כבר מספיק לסבב. */
 function buildDecks(rows){
   return rows
     .map(function(r, i){ return makeDeck(r, i); })
-    .filter(function(d){ return d.items && d.items.length >= 4; });
+    .filter(function(d){
+      return d.items && d.modes.length && d.items.length >= (d.min || 4);
+    });
 }
 
 /* מקור התוכן. בשלב זה עדיין מהחבילה המוטמעת; ההחלפה למסד תבוא בנפרד. */
@@ -1764,15 +2050,30 @@ function answer(optId){
   if(ok) quiz.correct++; else quiz.misses.push(q);
 
   const ms    = q.shownAt ? Date.now() - q.shownAt : 0;
-  const grade = gradeOf(ok, ms);
+  scheduleReview(q, gradeOf(ok, ms), ms);
+
+  render();
+  if(ok) setTimeout(function(){ if(quiz && quiz.qs[quiz.i]===q) next(); }, 850);
+}
+/* תרגיל שיבוץ: אין מעבר אוטומטי, כי התיקונים על הלוח הם חלק מהלמידה */
+function submitActivity(){
+  const q = quiz.qs[quiz.i];
+  if(q.answered || !q.act) return;
+  q.result = gradeActivity(q);
+  q.answered = true; q.sel = null;
+  const ok = q.result.right === q.result.total;
+  if(ok) quiz.correct++; else quiz.misses.push(q);
+
+  const ms = q.shownAt ? Date.now() - q.shownAt : 0;
+  scheduleReview(q, gradeOfSet(q.result.right, q.result.total, ms), ms);
+  renderNow();
+}
+function scheduleReview(q, grade, ms){
   const prev  = cardState(q.key);
   const elapsedDays = prev ? (Date.now() - prev.last) / DAY : null;
   const st    = reviewCard(prev, grade);
   q.interval  = Math.round((st.due - Date.now()) / DAY);
   recordReview(q.key, st, grade, elapsedDays, ms);
-
-  render();
-  if(ok) setTimeout(function(){ if(quiz && quiz.qs[quiz.i]===q) next(); }, 850);
 }
 function next(){
   if(quiz.i < quiz.qs.length-1){ quiz.i++; }
@@ -2005,6 +2306,13 @@ function explainText(q, correct, chosen){
   };
   const prompt = ((q.prompt.main || '') + (q.prompt.sub ? ' — ' + q.prompt.sub : '')).trim();
 
+  if(q.act){
+    return {
+      question: (q.label || 'תרגיל') + ' — ' + (q.prompt.main || ''),
+      answer:   solutionText(q.act),
+      chosen:   mistakesText(q)
+    };
+  }
   if(q.optionKind === 'pic'){
     /* התשובה היא המבנה, ומה שמזהה אותו הוא הניסוח שבשאלה */
     return {
@@ -2020,6 +2328,224 @@ function explainText(q, correct, chosen){
   };
 }
 
+/* ===========================================================
+   לוח השיבוץ. כל שינוי מצייר מחדש את כל המסך — ה-DOM זעיר, והמיקום
+   בגלילה נשמר כי זו אותה שאלה (ראה paint).
+   =========================================================== */
+/* "α-קטוגלוטרט" נשבר אחרי המקף, ובכיוון ימין־לשמאל השורה הראשונה
+   נראית "-α". מילה עם מקף נשארת שלמה. */
+function unbroken(s){
+  return esc(s).split(' ').map(function(w){
+    return w.indexOf('-') > -1 ? '<span class="nb">'+w+'</span>' : w;
+  }).join(' ');
+}
+function chipHTML(q, c){
+  let cls = 'chip-a';
+  /* מה שנשאר בבנק לא שובץ לא נכון — הוא פשוט חסר, והמקום שלו מסומן ביעד */
+  if(q.answered) cls += q.result.marks[c.id] ? ' ok' : q.place[c.id] ? ' bad' : ' miss';
+  else if(q.sel === c.id) cls += ' sel';
+  return '<button class="'+cls+'" data-chip="'+c.id+'"'+
+    (q.answered ? ' disabled' : ' draggable="true" aria-pressed="'+(q.sel === c.id)+'"')+'>'+
+    unbroken(c.text)+'</button>';
+}
+/* יעד אפשרי מסומן כשיש פריט ביד, חוץ מהמקום שממנו הוא בא */
+function canCls(q, zone){
+  return q.sel && !q.answered && (q.place[q.sel] || null) !== zone ? ' can' : '';
+}
+function slotHTML(q, t, name){
+  const inside = chipsIn(q, t.id)[0];
+  const wrong = q.answered && (!inside || !q.result.marks[inside.id]);
+  return '<div class="slot'+canCls(q, t.id)+'" data-zone="'+t.id+'">'+
+      (inside ? chipHTML(q, inside)
+              : '<button class="hole" data-zone="'+t.id+'" aria-label="'+esc(name)+' — ריק"'+
+                  (q.answered ? ' disabled' : '')+'></button>')+
+    '</div>'+
+    (wrong ? '<span class="fix">'+unbroken(t.expect[0])+'</span>' : '');
+}
+function stepCell(q, s){
+  if(s.given) return '<div class="given">'+unbroken(s.label)+'</div>';
+  return slotHTML(q, targetOf(q, s.id), 'שלב '+(s.i+1));
+}
+function arrowCell(q, a){
+  if(!a.given) return slotHTML(q, targetOf(q, a.id), 'חץ '+(a.i+1));
+  return a.label ? esc(a.label) : '';
+}
+
+function bankHTML(q){
+  const left = chipsIn(q, null);
+  return '<div class="bank'+(left.length ? '' : ' empty')+(q.answered ? ' done' : '')+canCls(q, null)+'" data-zone="bank">'+
+    '<div class="zone-hd">'+(q.answered
+      ? (left.length ? 'נשארו בבנק' : 'הבנק ריק')
+      : 'בנק תשובות · הקש על פריט ואז על המקום שלו, או גרור')+'</div>'+
+    '<div class="chips-a">'+left.map(function(c){ return chipHTML(q, c); }).join('')+'</div>'+
+  '</div>';
+}
+
+function groupsHTML(q){
+  return '<div class="groups">'+q.layout.groups.map(function(g){
+    const inside = chipsIn(q, g.id);
+    let missing = '';
+    if(q.answered){
+      const have = inside.map(function(c){ return c.text; });
+      missing = g.expect.filter(function(x){ return have.indexOf(x) < 0; }).map(function(x){
+        return '<span class="chip-a ghost">'+unbroken(x)+'</span>';
+      }).join('');
+    }
+    return '<div class="grp'+canCls(q, g.id)+'" data-zone="'+g.id+'">'+
+      '<button class="grp-hd" data-zone="'+g.id+'"'+(q.answered ? ' disabled' : '')+'>'+
+        unbroken(g.label)+(g.sub ? '<small>'+esc(g.sub)+'</small>' : '')+'</button>'+
+      '<div class="chips-a">'+inside.map(function(c){ return chipHTML(q, c); }).join('')+missing+'</div>'+
+    '</div>';
+  }).join('')+'</div>';
+}
+
+function seqHTML(q){
+  const L = q.layout, last = L.steps.length - 1;
+  return '<ol class="seq">'+L.steps.map(function(s, i){
+    const a = L.arrows[i];
+    return '<li class="st"><span class="num">'+(i+1)+'</span><div class="cell">'+stepCell(q, s)+'</div></li>'+
+      (a ? '<li class="ar"><span class="ar-glyph">'+(i === last ? '↺' : '↓')+'</span>'+
+             '<div class="cell">'+arrowCell(q, a)+(i === last ? ' · חזרה לשלב 1' : '')+'</div></li>'
+         : '');
+  }).join('')+'</ol>';
+}
+
+/* ---------- מעגל ----------
+   הצמתים על אליפסה גבוהה, ביחידות שבהן 100 = רוחב המכל. המרווח ביניהם
+   שווה לא בזווית ולא באורך קשת, אלא בגודל התיבה: תזוזה אופקית נמדדת
+   ברוחב צומת ואנכית בגובהו. כך גם צמד שכנים בקודקוד העליון — שם הם
+   זה לצד זה — משאיר מקום לחץ. */
+const CYC = {h:125, rx:37, ry:51, hw:14, hh:8};
+
+function cycleGeometry(n){
+  const N = 720, cy = CYC.h / 2, pts = [], cum = [0];
+  for(let k=0;k<=N;k++){
+    const t = -Math.PI/2 + 2*Math.PI*k/N;
+    pts.push({x:50 + CYC.rx*Math.cos(t), y:cy + CYC.ry*Math.sin(t)});
+    if(k) cum.push(cum[k-1] + Math.hypot((pts[k].x - pts[k-1].x) / CYC.hw,
+                                         (pts[k].y - pts[k-1].y) / CYC.hh));
+  }
+  const at = [];
+  for(let i=0, k=0;i<n;i++){
+    while(k < N && cum[k] < cum[N] * i / n) k++;
+    at.push(k);
+  }
+  const inBox = function(p, c){
+    return Math.abs(p.x - c.x) < CYC.hw && Math.abs(p.y - c.y) < CYC.hh;
+  };
+  const arcs = at.map(function(k0, i){
+    const k1 = i === n - 1 ? N : at[i+1];
+    const a = pts[k0], b = pts[k1 % N];
+    const seg = [];
+    for(let k=k0;k<=k1;k++){ if(!inBox(pts[k], a) && !inBox(pts[k], b)) seg.push(pts[k]); }
+    return seg;
+  });
+  return {nodes:at.map(function(k){ return pts[k]; }), arcs:arcs};
+}
+
+function cycleHTML(q){
+  const L = q.layout, n = L.steps.length, G = cycleGeometry(n);
+  const labelled = L.arrows.some(function(a){ return a.label; });
+  const f = function(v){ return v.toFixed(2); };
+  let svg = '<svg viewBox="0 0 100 '+CYC.h+'" aria-hidden="true" direction="ltr">'+
+    '<defs><marker id="cyc-ah" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="5" markerHeight="5" '+
+      'orient="auto"><path d="M0,1 L9,5 L0,9 z" fill="var(--ink-2)"/></marker></defs>';
+  G.arcs.forEach(function(seg, i){
+    if(seg.length < 2) return;
+    svg += '<path d="M'+seg.map(function(p){ return f(p.x)+' '+f(p.y); }).join(' L')+'" fill="none" '+
+      'stroke="var(--line-2)" stroke-width="0.7" stroke-linecap="round" marker-end="url(#cyc-ah)"/>';
+    if(!labelled) return;
+    const m = seg[Math.floor(seg.length / 2)];
+    svg += '<circle cx="'+f(m.x)+'" cy="'+f(m.y)+'" r="3.4" fill="var(--surface)" stroke="var(--line-2)" stroke-width="0.4"/>'+
+      '<text x="'+f(m.x)+'" y="'+f(m.y)+'" font-size="3.6" font-weight="600" fill="var(--ink-2)" '+
+      'text-anchor="middle" dominant-baseline="central" font-family="IBM Plex Sans, sans-serif">'+(i+1)+'</text>';
+  });
+  svg += '</svg>';
+
+  const nodes = L.steps.map(function(s, i){
+    const p = G.nodes[i];
+    return '<div class="cn" style="left:'+f(p.x)+'%;top:'+f(p.y / CYC.h * 100)+'%">'+stepCell(q, s)+'</div>';
+  }).join('');
+
+  const legend = labelled
+    ? '<ol class="legend-a">'+L.arrows.map(function(a){
+        return '<li><span class="badge">'+(a.i+1)+'</span><div class="cell">'+arrowCell(q, a)+'</div></li>';
+      }).join('')+'</ol>'
+    : '';
+  return '<div class="cyc">'+svg+nodes+'</div>'+legend;
+}
+
+function boardHTML(q){
+  let targets;
+  if(q.act.type === 'sort') targets = groupsHTML(q);
+  else if(q.act.cycle && q.layout.steps.length <= CYCLE_MAX) targets = cycleHTML(q);
+  else targets = seqHTML(q);
+  return '<div class="board">'+bankHTML(q)+targets+'</div>';
+}
+
+function wireBoard(q){
+  const board = app.querySelector('.board');
+  if(!board || q.answered) return;
+  const zoneOf = function(el){ const z = el.dataset.zone; return z === 'bank' ? null : z; };
+  /* ציור מחדש מאבד פוקוס; מחזירים אותו לאותו אלמנט בשביל מקלדת */
+  const redraw = function(sel){
+    renderNow();
+    const el = sel && app.querySelector(sel);
+    if(el && el.focus) el.focus({preventScroll:true});
+  };
+  board.addEventListener('click', function(e){
+    const chip = e.target.closest('[data-chip]');
+    if(chip){ tapChip(q, chip.dataset.chip); redraw('[data-chip="'+chip.dataset.chip+'"]'); return; }
+    const zone = e.target.closest('[data-zone]');
+    if(zone && q.sel){
+      const moving = q.sel;
+      tapZone(q, zoneOf(zone));
+      redraw('[data-chip="'+moving+'"]');
+    }
+  });
+  /* גרירה בעכבר. במגע ההקשה היא הדרך — גרירה שם חוסמת גלילה */
+  board.addEventListener('dragstart', function(e){
+    const chip = e.target.closest && e.target.closest('[data-chip]');
+    if(!chip) return;
+    q.drag = chip.dataset.chip;
+    try{ e.dataTransfer.setData('text/plain', q.drag); e.dataTransfer.effectAllowed = 'move'; }catch(err){}
+    chip.classList.add('drag');
+  });
+  board.addEventListener('dragend', function(){ q.drag = null; renderNow(); });
+  board.addEventListener('dragover', function(e){
+    if(q.drag && e.target.closest && e.target.closest('[data-zone]')) e.preventDefault();
+  });
+  board.addEventListener('drop', function(e){
+    const zone = e.target.closest && e.target.closest('[data-zone]');
+    if(!q.drag || !zone) return;
+    e.preventDefault();
+    placeChip(q, q.drag, zoneOf(zone));
+    q.drag = null;
+    renderNow();
+  });
+}
+
+function activityFooter(q){
+  if(!q.answered){
+    const placed = Object.keys(q.place).length;
+    return '<div class="act-foot">'+
+      '<button class="btn primary" id="checkBtn">'+(placed ? 'בדוק' : 'הצג תשובה')+'</button>'+
+      '<span dir="ltr">'+placed+'/'+q.chips.length+'</span></div>';
+  }
+  const r = q.result, ok = r.right === r.total;
+  const back = q.interval >= 1
+    ? ' · חוזר בעוד ' + q.interval + (q.interval === 1 ? ' יום' : ' ימים')
+    : ' · חוזר בקרוב';
+  let fb = '<div class="feedback '+(ok ? 'ok' : 'bad')+'"><span class="fb-txt">'+
+    (ok ? 'מושלם' : r.right+' מתוך '+r.total+' במקום')+(q.why ? ' — '+esc(q.why) : '')+back+'</span>'+
+    (!ok && CFG.explainUrl && AUTH && AUTH.editor
+      ? '<button class="why-btn" id="whyBtn">'+(q.whyBusy ? '…' : 'למה?')+'</button>' : '')+
+    '<button class="next" id="nextBtn">הבא</button></div>';
+  const cached = !ok && (q.whyText || whyFor(q.key));
+  if(cached) fb += '<div class="why">'+esc(cached)+'</div>';
+  return fb;
+}
+
 function renderQuiz(){
   const q = quiz.qs[quiz.i];
   const answered = !!q.answered;
@@ -2028,7 +2554,9 @@ function renderQuiz(){
   const correctOpt = q.options.filter(function(o){ return o.id===q.answer; })[0];
 
   let opts;
-  if(q.optionKind==='pic'){
+  if(q.act){
+    opts = boardHTML(q);
+  } else if(q.optionKind==='pic'){
     opts = '<div class="opts grid">'+q.options.map(function(o){
       let cls='opt pic';
       if(answered){ cls += o.id===q.answer ? ' correct' : (o.id===q.answered ? ' wrong' : ' dim'); }
@@ -2049,7 +2577,8 @@ function renderQuiz(){
   }
 
   let fb='<div class="feedback hide"></div>';
-  if(answered){
+  if(q.act) fb = activityFooter(q);
+  else if(answered){
     const name = correctOpt ? correctOpt.main : '';
     const back = q.interval >= 1
       ? ' · חוזר בעוד ' + q.interval + (q.interval === 1 ? ' יום' : ' ימים')
@@ -2075,14 +2604,21 @@ function renderQuiz(){
   '</div>'+
   '<div class="quiz">'+
     '<div class="prompt-label">'+esc(q.label)+'</div>'+
-    '<div class="stage">'+promptHTML(q.prompt)+'</div>'+
+    '<div class="stage'+(q.act ? ' slim' : '')+'">'+promptHTML(q.prompt)+'</div>'+
     opts + '<div class="fb-wrap">' + fb + '</div>' +
   '</div>';
 
-  app.querySelector('#homeBtn').addEventListener('click', function(){ view={name:'deck',deck:quiz.deck.id}; quiz=null; render(); });
+  /* לסבב המאוחד אין מסך חבילה — חוזרים הביתה */
+  app.querySelector('#homeBtn').addEventListener('click', function(){
+    view = quiz.deck.id==='all' ? {name:'home'} : {name:'deck',deck:quiz.deck.id};
+    quiz=null; render();
+  });
   Array.prototype.forEach.call(app.querySelectorAll('.opt'), function(btn){
     btn.addEventListener('click', function(){ answer(btn.dataset.id); });
   });
+  if(q.act) wireBoard(q);
+  const cb=app.querySelector('#checkBtn');
+  if(cb) cb.addEventListener('click', submitActivity);
   const nb=app.querySelector('#nextBtn');
   if(nb) nb.addEventListener('click', next);
 
@@ -2125,6 +2661,9 @@ function renderResults(){
   const verdict = pct===100 ? 'סבב מושלם.' : pct>=75 ? 'קרוב. עוד סבב ונעול.' : 'החומר עוד רופף — סבב נוסף.';
 
   const rows = uniq.map(function(q){
+    if(q.act) return '<div class="miss"><span class="m-sym">'+(q.act.type==='sort' ? '⊞' : q.act.cycle ? '↻' : '↓')+'</span>'+
+      '<div class="m-txt"><strong>'+esc(q.prompt.main)+'</strong>'+
+      '<span>'+q.result.right+' מתוך '+q.result.total+' במקום הנכון</span></div></div>';
     const c = q.options.filter(function(o){ return o.id===q.answer; })[0] || {};
     let lead='';
     if(c.mol) lead = molSVG(c.mol,{alt:'מבנה'});
@@ -2770,6 +3309,7 @@ function renderBrowse(){
   }).filter(function(r){
     if(!q) return true;
     return [r.b.title, r.b.sub, r.b.body, r.b.note, r.b.tag]
+      .concat((r.b.rows || []).map(function(x){ return x.head + ' ' + x.text; }))
       .filter(Boolean).join(' ').toLowerCase().indexOf(q) > -1;
   });
 
@@ -2782,6 +3322,10 @@ function renderBrowse(){
       '<h4'+(b.ltr?' class="ltr"':'')+'>'+esc(b.title)+'</h4>'+
       (b.sub ? '<div class="sub">'+esc(b.sub)+'</div>' : '')+
       (b.body ? '<div class="body'+(hide?' blur':'')+'">'+esc(b.body)+'</div>' : '')+
+      (b.rows ? '<'+(b.ordered?'ol':'ul')+' class="body blist'+(hide?' blur':'')+'">'+
+        b.rows.map(function(x){
+          return '<li><b>'+unbroken(x.head)+'</b>'+(x.text ? ' <bdi class="via">'+esc(x.text)+'</bdi>' : '')+'</li>';
+        }).join('')+'</'+(b.ordered?'ol':'ul')+'>' : '')+
       (b.note ? '<div class="note">'+esc(b.note)+'</div>' : '')+
       '<div class="row">'+memChip(r.key)+
         (b.tag ? '<span class="chip cat" style="color:'+(b.tagColor||'var(--ink-2)')+
@@ -3306,8 +3850,11 @@ function render(){
 }
 function renderNow(){ renderPending = false; paint(); }
 
+/* גלילה לראש רק במעבר מסך. ציור חוזר של אותו מסך — תשובה, סנכרון
+   ברקע, שיבוץ בתרגיל — משאיר את המשתמש איפה שהיה. */
+let paintedAt = null;
 function paint(){
-  if(authEnabled && !AUTH){ renderLock(); window.scrollTo(0,0); return; }
+  if(authEnabled && !AUTH){ renderLock(); window.scrollTo(0,0); paintedAt = 'lock'; return; }
   if(quiz && quiz.done) renderResults();
   else if(quiz) renderQuiz();
   else if(view.name==='deck') renderDeck();
@@ -3318,7 +3865,9 @@ function paint(){
   else if(view.name==='stats') renderStats();
   else if(view.name==='errors') renderErrors();
   else renderHome();
-  window.scrollTo(0,0);
+  const at = quiz ? 'quiz:' + quiz.i + (quiz.done ? ':done' : '') : view.name + ':' + (view.deck || '');
+  if(at !== paintedAt) window.scrollTo(0,0);
+  paintedAt = at;
 }
 
 document.addEventListener('keydown', function(e){
@@ -3326,7 +3875,7 @@ document.addEventListener('keydown', function(e){
   const q = quiz.qs[quiz.i];
   if(q.answered && (e.key==='Enter'||e.key===' ')){ e.preventDefault(); next(); return; }
   const n = parseInt(e.key,10);
-  if(n>=1 && n<=4 && !q.answered) answer(q.options[n-1].id);
+  if(n>=1 && n<=4 && !q.answered && q.options[n-1]) answer(q.options[n-1].id);
 });
 
 /* ===========================================================
