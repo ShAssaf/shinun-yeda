@@ -2173,9 +2173,11 @@ function renderHome(){
       '<div class="stat"><b dir="ltr">'+totalMastered+'<span style="font-size:14px;color:var(--ink-2)">/'+totalItems+'</span></b><span>נשלטים</span></div>'+
       '<div class="stat"><b>'+(store.rounds||0)+'</b><span>סבבים</span></div>'+
     '</button>'+
-    (LIB.status === 'cached' && canSync()
+    /* 'cached' הוא גם מצב הפתיחה, לפני שבכלל פנינו לשרת. רק reason
+       מעיד על ניסיון שנכשל — בלעדיו האזהרה הופיעה בכל כניסה. */
+    (LIB.status === 'cached' && LIB.reason && canSync()
       ? '<div class="lib-warn">מוצג מהמטמון המקומי — לא הצלחתי לרענן מהשרת'+
-          (LIB.reason ? ' ('+esc(LIB.reason)+')' : '')+'.'+
+          ' ('+esc(LIB.reason)+').'+
           '<button id="refreshLib">רענן</button></div>'
       : '')+
     (!DECKS.length
