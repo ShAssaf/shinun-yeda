@@ -630,6 +630,36 @@ h1{
   border:1px solid var(--line-2);color:var(--ink-2);font-weight:400;
 }
 .vis.pub{color:var(--accent);border-color:var(--accent)}
+.vis.wait{color:var(--c-o);border-color:var(--c-o)}
+.vis.no{color:var(--bad);border-color:var(--bad)}
+.scard .rnote{color:var(--bad)}
+
+/* ---------- ניהול ---------- */
+.admin-wrap{flex:1;display:flex;flex-direction:column;gap:12px;padding:4px 0 10px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap}
+.tabs button{
+  border:1px solid var(--line-2);border-radius:99px;padding:5px 12px;font-size:12.5px;color:var(--ink-2);
+}
+.tabs button.on{color:var(--accent);border-color:var(--accent)}
+.tabs button b{font-weight:600;margin-inline-start:4px}
+.arow{
+  background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:11px 12px;
+  display:flex;flex-direction:column;gap:8px;
+}
+.arow .ahead{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.arow strong{font-size:14.5px;font-weight:600;word-break:break-word}
+.arow .meta{font-size:12px;color:var(--ink-2);line-height:1.5;word-break:break-word}
+.arow .meta b{color:var(--ink);font-weight:500}
+.arow .warn{color:var(--c-o)}
+.arow .acts{display:flex;gap:6px;flex-wrap:wrap}
+.arow .acts button{
+  border:1px solid var(--line-2);border-radius:99px;padding:5px 12px;font-size:12.5px;color:var(--ink-2);
+}
+.arow .acts button.ok{color:var(--ok);border-color:var(--ok)}
+.arow .acts button.danger:hover{color:var(--bad);border-color:var(--bad)}
+.arow .acts button:disabled{opacity:.5;cursor:default}
+.ekind.k-sync{color:var(--accent);border-color:var(--accent)}
+.ewho{font-family:"IBM Plex Sans",sans-serif;font-size:11px;color:var(--ink-2);margin-top:4px;word-break:break-all}
 
 /* ---------- עיון ---------- */
 .browse-wrap{flex:1;display:flex;flex-direction:column;gap:12px;padding:4px 0 10px}
@@ -781,7 +811,18 @@ const CFG = (function(){
   try{ return el ? JSON.parse(el.textContent) : {}; }catch(e){ return {}; }
 })();
 
-function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+/* בטוח גם לתוך ערך של מאפיין HTML. פעם רק & ו-< הומרו, ומזהה או צבע
+   עם גרשיים מחבילה ציבורית יכלו להוסיף מאפיינים משלהם. */
+function esc(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                  .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+/* צבע מתוכן משתמשים נכנס ל-style — רק משתנה עיצוב, hex או שם פשוט */
+function safeColor(c, fb){
+  const v = String(c == null ? '' : c).trim();
+  if(/^var\(--[a-z0-9-]{1,30}\)$/i.test(v) || /^#[0-9a-f]{3,8}$/i.test(v) || /^[a-z]{3,20}$/i.test(v)) return v;
+  return fb || 'var(--ink-2)';
+}
 function shuffle(arr){
   const a=arr.slice();
   for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); const t=a[i]; a[i]=a[j]; a[j]=t; }
@@ -858,7 +899,7 @@ function molSVG(g, opts){
     const charge=at.t.indexOf('⁻')>-1?'–':(at.t.indexOf('⁺')>-1?'+':'');
     let inner=esc(base);
     if(charge) inner+='<tspan dy="-0.22" font-size="0.36">'+charge+'</tspan>';
-    atoms+='<text x="'+at.x+'" y="'+at.y+'" fill="'+atomColor(at.t)+'">'+inner+'</text>';
+    atoms+='<text x="'+(+at.x||0)+'" y="'+(+at.y||0)+'" fill="'+atomColor(at.t)+'">'+inner+'</text>';
   });
 
   return '<svg viewBox="'+vx+' '+vy+' '+vw+' '+vh+'" xmlns="http://www.w3.org/2000/svg" '+
@@ -1014,139 +1055,564 @@ function reviewCard(st, g, now){
 }
 
 /* ===========================================================
-   התמדה
+   אחסון מקומי
+   כל מה ששייך למשתמש — כרטיסים, תור, הגדרות, ספרייה, הסברים — נשמר
+   תחת מפתח עם ה-uid שלו. כך משתמש שני באותו מכשיר לא רואה את הראשון,
+   והתנתקות (גם כפויה, כשהמפגש פג) לא מוחקת תרגול שעוד לא הגיע לשרת.
+     UID === null — אין משתמש, ושום דבר לא נכתב.
+     UID === ''   — יש מפגש שה-uid שלו עוד לא ידוע. הנתונים נשמרים
+                    במרחב הישן (בלי סיומת), והמשתמש הראשון שמזוהה מאמץ
+                    אותם — כך עברו הנתונים מהגרסה שלא הפרידה בין משתמשים.
    =========================================================== */
-/* הגדרות המשתמש — תאריך מבחן ומונה סבבים. מראה מקומי לאופליין,
-   מקור אמת ב-user_settings. תאריך המבחן חייב להיות בשרת כי הוא
-   משפיע על התזמון עצמו. */
-const KEY='bio-quiz-v2';
-function loadState(){
-  try{ const r=localStorage.getItem(KEY); return r?JSON.parse(r):{rounds:0, examDate:null}; }
-  catch(e){ return {rounds:0, examDate:null}; }
-}
-function saveState(s){ try{ localStorage.setItem(KEY,JSON.stringify(s)); }catch(e){} }
-let store = loadState();
-if(typeof store.rounds !== 'number') store.rounds = 0;
-delete store.best;                       /* שדה מת מגרסאות קודמות */
+const KEY = 'bio-quiz-v2';                     /* הגדרות: תאריך מבחן, סבבים */
+const CARDS_KEY = 'shinun-cards';              /* מצב FSRS לכל כרטיס */
+const DIRTY_KEY = 'shinun-dirty';              /* כרטיסים שהשרת עוד לא אישר */
+const LOG_KEY   = 'shinun-log';                /* יומן חזרות שממתין לשליחה */
+const QUEUE_KEY = 'shinun-queue';              /* התור הישן — מומר בהעברה */
+const EXPLAIN_KEY = 'shinun-why';              /* הסברי "למה?" */
+const ROWS_KEY  = 'shinun-rows';               /* מראה של הספרייה, לאופליין */
+const STORAGE = { failed:null };
 
-/* ===========================================================
-   מצב הכרטיסים — מראה מקומי ב-localStorage, מקור אמת ב-Supabase.
-   הכתיבה עוברת דרך תור, כדי שתרגול בלי רשת לא יאבד היסטוריה.
-   =========================================================== */
-const CARDS_KEY = 'shinun-cards', QUEUE_KEY = 'shinun-queue';
+let UID = null;
+/* עולה בכל החלפת משתמש. תשובה אסינכרונית שחוזרת אחרי החלפה נזרקת,
+   כדי שנתונים של משתמש קודם לא ייכתבו בחזרה אל המכשיר. */
+let USER_EPOCH = 0;
+
 function jread(k, fb){ try{ const r=localStorage.getItem(k); return r?JSON.parse(r):fb; }catch(e){ return fb; } }
-function jwrite(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
-
-let CARDS = jread(CARDS_KEY, {});
-let QUEUE = jread(QUEUE_KEY, []);
-
-function restHeaders(){
-  return { apikey: CFG.supabaseKey, Authorization: 'Bearer ' + (AUTH && AUTH.access),
-           'Content-Type': 'application/json' };
+/* מחזיר אם נשמר. כשהמקום נגמר מפנים קודם את מה שהשרת יכול להחזיר,
+   ומנסים שוב — כך הכרטיסים והתור לא נופלים בשקט. */
+function jwrite(k, v){
+  let text;
+  try{ text = JSON.stringify(v); }catch(e){ return false; }
+  try{ localStorage.setItem(k, text); return true; }catch(e){}
+  if(freeSpace(k)){
+    try{ localStorage.setItem(k, text); return true; }catch(e){}
+  }
+  STORAGE.failed = String(k).split(':')[0];
+  noteStorageFailure();
+  return false;
 }
-function canSync(){ return !!(CFG.supabaseUrl && AUTH && AUTH.access); }
+function jremove(k){ try{ localStorage.removeItem(k); }catch(e){} }
+function storageKeys(){
+  const out = [];
+  try{ for(let i=0;i<localStorage.length;i++) out.push(localStorage.key(i)); }catch(e){}
+  return out;
+}
+/* סדר הפינוי: הסברים, ספריות של משתמשים אחרים, ואז הספרייה שלי. הכול
+   נמשך שוב מהשרת. כרטיסים, תור והגדרות לעולם לא מפונים. */
+function freeSpace(keep){
+  const keys = storageKeys().filter(function(k){ return k !== keep; });
+  const mine = UID ? ROWS_KEY + ':' + UID : ROWS_KEY;
+  const waves = [
+    function(k){ return k === EXPLAIN_KEY || k.indexOf(EXPLAIN_KEY + ':') === 0; },
+    function(k){ return (k === ROWS_KEY || k.indexOf(ROWS_KEY + ':') === 0) && k !== mine; },
+    function(k){ return k === mine; }
+  ];
+  for(let i=0;i<waves.length;i++){
+    const hit = keys.filter(waves[i]);
+    if(hit.length){ hit.forEach(jremove); return true; }
+  }
+  return false;
+}
+let storageNoting = false;
+function noteStorageFailure(){
+  if(storageNoting) return;
+  storageNoting = true;
+  try{ logError('client', 'האחסון המקומי מלא — ' + STORAGE.failed, null); }catch(e){}
+  storageNoting = false;
+}
+
+function ukey(base){ return UID ? base + ':' + UID : base; }
+function uread(base, fb){ return UID === null ? fb : jread(ukey(base), fb); }
+function uwrite(base, v){ return UID === null ? false : jwrite(ukey(base), v); }
+function isObj(x){ return !!x && typeof x === 'object' && !Array.isArray(x); }
+
+/* ---------- הגדרות: תאריך מבחן ומונה סבבים ----------
+   מקור האמת ב-user_settings. תאריך המבחן חייב להיות בשרת כי הוא משפיע
+   על התזמון עצמו. examAt הוא זמן השינוי המקומי, והשרת דוחה תאריך ישן
+   מזה שכבר יש לו; dirty נשאר עד שהשרת אישר. */
+function defaultSettings(){ return {rounds:0, examDate:null, examAt:0, dirty:false}; }
+function normSettings(s){
+  const o = defaultSettings();
+  if(isObj(s)){
+    if(typeof s.rounds === 'number' && s.rounds >= 0) o.rounds = Math.floor(s.rounds);
+    if(typeof s.examDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s.examDate)) o.examDate = s.examDate;
+    if(typeof s.examAt === 'number' && isFinite(s.examAt)) o.examAt = s.examAt;
+    o.dirty = !!s.dirty;
+  }
+  return o;
+}
+let store = defaultSettings();
+let SETTINGS_VER = 0;
+function saveState(s){ uwrite(KEY, s); }
+function setExamDate(v){
+  store.examDate = v || null; store.examAt = Date.now(); store.dirty = true; SETTINGS_VER++;
+  saveState(store);
+}
+function bumpRounds(){
+  store.rounds = (store.rounds || 0) + 1; store.dirty = true; SETTINGS_VER++;
+  saveState(store);
+}
+
+/* ---------- מצב הכרטיסים ----------
+   CARDS  — מצב FSRS לכל כרטיס: {s, d, due, last, reps, lapses}.
+   DIRTY  — מפתחות שהמצב שלהם עוד לא אושר בשרת. בזמן השליחה השורה נבנית
+            מ-CARDS, כך שנשלח תמיד המצב האחרון, פעם אחת לכל כרטיס.
+   LOGQ   — יומן החזרות, כל רשומה עם מזהה משלה, כך ששליחה חוזרת אחרי
+            תשובה שאבדה לא מכפילה אותה בשרת. */
+let CARDS = {};
+let DIRTY = {};
+let LOGQ  = [];
+const LOG_CAP = 5000;
 
 function cardState(key){ return CARDS[key] || null; }
+function validState(st){
+  return isObj(st) && isFinite(st.s) && isFinite(st.d) && isFinite(st.due) && isFinite(st.last);
+}
+function newId(){
+  const c = typeof crypto !== 'undefined' ? crypto : null;
+  if(c && typeof c.randomUUID === 'function') return c.randomUUID();
+  const b = new Uint8Array(16);
+  if(c && typeof c.getRandomValues === 'function') c.getRandomValues(b);
+  else for(let i=0;i<16;i++) b[i] = Math.floor(Math.random()*256);
+  b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+  const h = Array.prototype.map.call(b, function(x){ return ('0' + x.toString(16)).slice(-2); }).join('');
+  return h.slice(0,8)+'-'+h.slice(8,12)+'-'+h.slice(12,16)+'-'+h.slice(16,20)+'-'+h.slice(20);
+}
+/* int4 בשרת; שאלה שנשארה פתוחה יום שלם היא לא מדד לביטחון */
+function clampMs(ms){ return isFinite(ms) && ms > 0 ? Math.min(Math.round(ms), 3600000) : 0; }
+function numOrNull(x){ return x == null || !isFinite(x) ? null : +x; }
+
+function saveCards(){
+  /* הכרטיסים קודם: הם מה שהמתזמן קורא */
+  uwrite(CARDS_KEY, CARDS);
+  uwrite(DIRTY_KEY, DIRTY);
+  uwrite(LOG_KEY, LOGQ);
+}
 
 function recordReview(key, st, grade, elapsedDays, ms){
   CARDS[key] = st;
-  jwrite(CARDS_KEY, CARDS);
-  QUEUE.push({
-    card_key:key, stability:st.s, difficulty:st.d,
-    due:new Date(st.due).toISOString(), last_review:new Date(st.last).toISOString(),
-    reps:st.reps, lapses:st.lapses,
-    _log:{ card_key:key, rating:grade, elapsed_days:elapsedDays, duration_ms:ms }
-  });
-  jwrite(QUEUE_KEY, QUEUE);
-  flushQueue();
+  DIRTY[key] = 1;
+  LOGQ.push({ id:newId(), card_key:key, rating:grade,
+              elapsed_days:numOrNull(elapsedDays), duration_ms:clampMs(ms),
+              reviewed_at:new Date(st.last).toISOString() });
+  if(LOGQ.length > LOG_CAP) LOGQ = LOGQ.slice(-LOG_CAP);
+  saveCards();
+  syncCardsSoon();
 }
 
-let flushing = false;
-function flushQueue(){
-  if(flushing || !QUEUE.length || !canSync()) return Promise.resolve();
-  flushing = true;
-  const batch = QUEUE.slice();
-  const rows = batch.map(function(r){ const c=Object.assign({},r); delete c._log; return c; });
-  const logs = batch.map(function(r){ return r._log; });
-  return fetch(CFG.supabaseUrl + '/rest/v1/card_state?on_conflict=user_id,card_key', {
-    method:'POST',
-    headers: Object.assign(restHeaders(), {Prefer:'resolution=merge-duplicates,return=minimal'}),
-    body: JSON.stringify(rows)
-  }).then(function(r){
-    if(!r.ok) throw new Error('sync ' + r.status);
-    return fetch(CFG.supabaseUrl + '/rest/v1/review_log', {
-      method:'POST',
-      headers: Object.assign(restHeaders(), {Prefer:'return=minimal'}),
-      body: JSON.stringify(logs)
+/* ---------- הסברים ----------
+   מפתח לפי הכרטיס, התשובה שנבחרה ונוסח השאלה: הסבר נכתב על טעות מסוימת,
+   ותיקון בכרטיס הופך את ההסבר הישן ללא רלוונטי. */
+let WHY = {};
+const WHY_CAP = 300;
+function hashStr(s){
+  let h = 5381;
+  for(let i=0;i<s.length;i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+function whyKeyOf(q){
+  const right = (q.options || []).filter(function(o){ return o.id === q.answer; })[0];
+  let sig = '';
+  try{
+    sig = JSON.stringify([q.label, q.prompt, right ? right.main : '',
+                          q.act ? (q.chips || []).map(function(c){ return c.text; }) : 0]);
+  }catch(e){}
+  return q.key + '|' + (q.act ? 'act' : String(q.answered)) + '|' + hashStr(sig);
+}
+function whyFor(k){ const e = WHY[k]; return e && typeof e.t === 'string' ? e.t : null; }
+function whySave(k, text){
+  WHY[k] = {t:text, at:Date.now()};
+  const keys = Object.keys(WHY);
+  if(keys.length > WHY_CAP){
+    keys.sort(function(a,b){ return (WHY[a].at||0) - (WHY[b].at||0); })
+        .slice(0, keys.length - WHY_CAP).forEach(function(x){ delete WHY[x]; });
+  }
+  uwrite(EXPLAIN_KEY, WHY);
+}
+
+/* ---------- קשירת משתמש ----------
+   נקרא באתחול (לפני הציור הראשון), כשהזהות מתבררת, ובהתנתקות. אינו
+   מצייר בעצמו — הקורא מצייר. */
+function bindUser(uid){
+  if(uid === UID) return false;
+  const was = UID;
+  USER_EPOCH++;
+  if(uid) adoptLegacy(uid);
+  UID = uid;
+  loadUserState();
+  /* מעבר ממפגש לא מזוהה לזהות שלו הוא אותו אדם — לא מפריעים לו */
+  const sameUser = was === '' && !!uid;
+  if(!sameUser && was !== null){
+    quiz = null;
+    view = {name:'home'};
+  }
+  return true;
+}
+
+function loadUserState(){
+  store = normSettings(uread(KEY, null));
+  const cards = uread(CARDS_KEY, {});
+  CARDS = isObj(cards) ? cards : {};
+  const dirty = uread(DIRTY_KEY, {});
+  DIRTY = isObj(dirty) ? dirty : {};
+  const log = uread(LOG_KEY, []);
+  LOGQ = Array.isArray(log) ? log.filter(function(e){ return isObj(e) && e.id && e.card_key; }) : [];
+  const why = uread(EXPLAIN_KEY, {});
+  WHY = {};
+  if(isObj(why)) Object.keys(why).forEach(function(k){ if(isObj(why[k]) && typeof why[k].t === 'string') WHY[k] = why[k]; });
+  const rows = uread(ROWS_KEY, null);
+  LIB.gen++;
+  LIB.rows   = Array.isArray(rows) ? rows : [];
+  LIB.status = LIB.rows.length ? 'cached' : 'unknown';
+  LIB.reason = null;
+  LIB.subs   = null;
+  LIB.at     = 0;
+  DECKS = buildDecks(LIB.rows);
+}
+
+/* העברה חד־פעמית מהמרחב הישן (בלי uid) אל המשתמש הראשון שמזוהה.
+   כותבים את העותק החדש, ורק אם נשמר מוחקים את הישן. שום שליחה של
+   הגרסה הקודמת לא הצליחה (user_id חסר), ולכן כל כרטיס ישן מסומן
+   לשליחה — השרת שומר את המאוחר מבין השניים. */
+function adoptLegacy(uid){
+  const scoped = function(b){ return b + ':' + uid; };
+  const oldCards = jread(CARDS_KEY, null), oldDirty = jread(DIRTY_KEY, null);
+  const oldLog = jread(LOG_KEY, null), oldQueue = jread(QUEUE_KEY, null);
+
+  if(oldCards || oldDirty || oldLog || oldQueue){
+    const cards = jread(scoped(CARDS_KEY), {});
+    const dirty = jread(scoped(DIRTY_KEY), {});
+    const logA  = jread(scoped(LOG_KEY), []);
+    const C = isObj(cards) ? cards : {}, D = isObj(dirty) ? dirty : {};
+    let L = Array.isArray(logA) ? logA : [];
+    if(isObj(oldCards)) Object.keys(oldCards).forEach(function(k){
+      const st = oldCards[k];
+      if(!validState(st)) return;
+      if(!C[k] || st.last > C[k].last) C[k] = st;
+      D[k] = 1;
     });
-  }).then(function(){
-    QUEUE = QUEUE.slice(batch.length);
-    jwrite(QUEUE_KEY, QUEUE);
-  }).catch(function(){
-    /* נשאר בתור וינוסה שוב בטעינה הבאה או בתשובה הבאה */
-  }).then(function(){ flushing = false; });
-}
+    if(isObj(oldDirty)) Object.keys(oldDirty).forEach(function(k){ if(C[k]) D[k] = 1; });
+    if(Array.isArray(oldLog)) oldLog.forEach(function(e){ if(isObj(e) && e.id && e.card_key) L.push(e); });
+    /* התור הישן: {card_key, …מצב, _log:{rating, elapsed_days, duration_ms}} */
+    if(Array.isArray(oldQueue)) oldQueue.forEach(function(r){
+      if(!isObj(r) || !r.card_key) return;
+      if(C[r.card_key]) D[r.card_key] = 1;
+      const g = r._log || {};
+      if(!(g.rating >= 1 && g.rating <= 4)) return;
+      L.push({ id:newId(), card_key:r.card_key, rating:g.rating,
+               elapsed_days:numOrNull(g.elapsed_days), duration_ms:clampMs(g.duration_ms),
+               reviewed_at:r.last_review || new Date().toISOString() });
+    });
+    const seen = {};
+    L = L.filter(function(e){ if(seen[e.id]) return false; seen[e.id] = 1; return true; }).slice(-LOG_CAP);
+    const ok = jwrite(scoped(CARDS_KEY), C) && jwrite(scoped(DIRTY_KEY), D) && jwrite(scoped(LOG_KEY), L);
+    if(ok) [CARDS_KEY, DIRTY_KEY, LOG_KEY, QUEUE_KEY].forEach(jremove);
+    else logError('client', 'העברת הכרטיסים למשתמש נכשלה — הנתונים הישנים נשמרו', null);
+  }
 
-/* משיכת המצב מהשרת — מאחדת עם המקומי לפי last_review המאוחר יותר,
-   כך שמכשיר שתרגל אופליין לא נדרס וגם לא דורס. */
-function pullCards(){
-  if(!canSync()) return Promise.resolve();
-  return fetch(CFG.supabaseUrl +
-      '/rest/v1/card_state?select=card_key,stability,difficulty,due,last_review,reps,lapses',
-      { headers: restHeaders() })
-    .then(function(r){ return r.ok ? r.json() : null; })
-    .then(function(rows){
-      if(!rows) return;
-      let changed = false;
-      rows.forEach(function(row){
-        const remote = { s:row.stability, d:row.difficulty,
-                         due:Date.parse(row.due), last:Date.parse(row.last_review),
-                         reps:row.reps, lapses:row.lapses };
-        const local = CARDS[row.card_key];
-        if(!local || remote.last > local.last){ CARDS[row.card_key] = remote; changed = true; }
+  const oldSettings = jread(KEY, null);
+  if(oldSettings){
+    let ok = true;
+    if(jread(scoped(KEY), null) === null){
+      const s = normSettings(oldSettings);
+      s.dirty = true;                      /* ייתכן שמעולם לא נשמר בשרת */
+      ok = jwrite(scoped(KEY), s);
+    }
+    if(ok) jremove(KEY);
+  }
+
+  /* ספרייה: רק מה שבבעלותו או ציבורי. חבילה פרטית של משתמש אחר לא עוברת. */
+  const oldRows = jread(ROWS_KEY, null);
+  if(oldRows){
+    if(Array.isArray(oldRows) && jread(scoped(ROWS_KEY), null) === null){
+      const keep = oldRows.filter(function(r){
+        return isObj(r) && (r.owner_id === uid || r.visibility === 'public');
       });
-      if(changed){ jwrite(CARDS_KEY, CARDS); render(); }
-    }).catch(function(){});
+      if(keep.length) jwrite(scoped(ROWS_KEY), keep);
+    }
+    jremove(ROWS_KEY);
+  }
+  /* הסברים בפורמט הישן ממופתחים אחרת — אין מה להעביר */
+  jremove(EXPLAIN_KEY);
+  jremove('shinun-verified');
 }
 
-/* הסברים — נשמרים מקומית, כך שכל כרטיס עולה קריאה אחת בלבד */
-const EXPLAIN_KEY = 'shinun-why';
-let WHY = jread(EXPLAIN_KEY, {});
-function whyFor(key){ return WHY[key] || null; }
-function whySave(key, text){ WHY[key] = text; jwrite(EXPLAIN_KEY, WHY); }
+/* ===========================================================
+   סנכרון הכרטיסים
+   משיכה ← איחוד ← שליחה. הכלל: החזרה המאוחרת מנצחת, בשני הכיוונים.
+   מכשיר שתרגל אופליין לא נדרס וגם לא דורס; השרת אוכף את אותו כלל
+   (card_state_guard), כך שגם מכשיר ישן שמתעורר לא יחזיר מצב אחורה.
+   =========================================================== */
+const CARD_CHUNK = 200, PULL_PAGE = 1000;
+let cardSync = null, cardSyncAgain = false, cardSyncFull = false, cardSyncTimer = null;
+
+function canSyncUser(){ return canSync() && !!UID && authUid() === UID; }
+
+/* אחרי תשובה — שליחה מרוכזת, לא בקשה לכל נגיעה */
+function syncCardsSoon(){
+  if(cardSyncTimer) clearTimeout(cardSyncTimer);
+  cardSyncTimer = setTimeout(function(){ cardSyncTimer = null; syncCards(false).catch(function(){}); }, 1500);
+}
+
+/* full: גם משיכה מהשרת (באתחול, בחזרה לאפליקציה, כשהרשת חוזרת).
+   בלעדיו רק שליחה — אחרי תשובות. */
+function syncCards(full){
+  if(full) cardSyncFull = true;
+  if(cardSync){ cardSyncAgain = true; return cardSync; }
+  if(!canSyncUser()) return Promise.resolve(false);
+  const ep = USER_EPOCH, uid = UID, pull = cardSyncFull;
+  cardSyncFull = false;
+  cardSync = (pull ? pullCards(ep, uid) : Promise.resolve())
+    .catch(function(){})
+    .then(function(){ return pushCards(ep, uid); })
+    .then(function(){ return pushLogs(ep, uid); })
+    .then(function(){ return true; }, function(){ return false; })
+    .then(function(ok){
+      cardSync = null;
+      if(cardSyncAgain && ep === USER_EPOCH){ cardSyncAgain = false; return syncCards(false); }
+      cardSyncAgain = false;
+      return ok;
+    });
+  return cardSync;
+}
+
+function readPage(path){
+  return rest(path).then(function(r){
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  });
+}
+
+/* משיכה בעמודים עד עמוד ריק — לא נשענים על גודל העמוד, כי max-rows
+   של הפרויקט עלול להיות קטן ממה שביקשנו */
+function pullCards(ep, uid){
+  ep = ep == null ? USER_EPOCH : ep;
+  uid = uid == null ? UID : uid;
+  if(!canSyncUser() || uid !== UID) return Promise.resolve(false);
+  const all = [];
+  const page = function(offset, n){
+    return readPage('card_state?select=card_key,stability,difficulty,due,last_review,reps,lapses' +
+                    '&user_id=eq.' + uid + '&order=card_key.asc&limit=' + PULL_PAGE + '&offset=' + offset)
+      .then(function(rows){
+        if(!Array.isArray(rows)) throw new Error('תשובה לא צפויה');
+        rows.forEach(function(r){ all.push(r); });
+        if(!rows.length || n >= 50) return;
+        return page(offset + rows.length, n + 1);
+      });
+  };
+  return page(0, 0).then(function(){
+    if(ep !== USER_EPOCH) return false;
+    mergeRemote(all);
+    return true;
+  });
+}
+
+function mergeRemote(rows){
+  const onServer = {};
+  let changed = false;
+  rows.forEach(function(row){
+    const remote = { s:+row.stability, d:+row.difficulty,
+                     due:Date.parse(row.due), last:Date.parse(row.last_review),
+                     reps:row.reps|0, lapses:row.lapses|0 };
+    if(!validState(remote)) return;
+    const mapped = legacyTarget(row.card_key);
+    const key = mapped || row.card_key;
+    const local = CARDS[key];
+    if(mapped){
+      /* שורה בשרת תחת המפתח הישן: המצב עובר למפתח החדש, ונשלח תחתיו */
+      if(!local || remote.last > local.last) CARDS[key] = remote;
+      DIRTY[key] = 1; changed = true;
+      return;
+    }
+    if(!local || remote.last > local.last){
+      CARDS[key] = remote;
+      delete DIRTY[key];
+      changed = true;
+    } else if(local.last === remote.last){
+      if(DIRTY[key]){ delete DIRTY[key]; changed = true; }
+    } else if(!DIRTY[key]){
+      DIRTY[key] = 1; changed = true;            /* המקומי חדש יותר — יישלח */
+    }
+    onServer[key] = 1;
+  });
+  /* מה שאין בשרת בכלל — יישלח. כך מתקבלת גם כל ההיסטוריה שנצברה
+     כשהשליחה נכשלה. */
+  Object.keys(CARDS).forEach(function(k){
+    if(!onServer[k] && !DIRTY[k] && validState(CARDS[k])){ DIRTY[k] = 1; changed = true; }
+  });
+  if(changed){ saveCards(); render(); }
+}
+
+function pushCards(ep, uid){
+  if(!canSyncUser() || uid !== UID || ep !== USER_EPOCH) return Promise.resolve();
+  const keys = Object.keys(DIRTY).filter(function(k){
+    if(validState(CARDS[k]) && !legacyTarget(k)) return true;
+    if(!CARDS[k]) delete DIRTY[k];
+    return false;
+  });
+  const chunk = function(i){
+    if(i >= keys.length || ep !== USER_EPOCH) return Promise.resolve();
+    const part = keys.slice(i, i + CARD_CHUNK), sent = {};
+    const rows = part.map(function(k){
+      const st = CARDS[k];
+      sent[k] = st.last;
+      return { user_id:uid, card_key:k, stability:st.s, difficulty:st.d,
+               due:new Date(st.due).toISOString(), last_review:new Date(st.last).toISOString(),
+               reps:st.reps|0, lapses:st.lapses|0 };
+    });
+    return rest('card_state?on_conflict=user_id,card_key', {
+      method:'POST',
+      headers:{Prefer:'resolution=merge-duplicates,return=minimal'},
+      body:JSON.stringify(rows)
+    }).then(function(r){
+      if(!r.ok) throw new Error('card_state ' + r.status);
+      if(ep !== USER_EPOCH) return;
+      /* רק מה שלא השתנה בזמן הטיסה יוצא מהתור */
+      part.forEach(function(k){ if(CARDS[k] && CARDS[k].last === sent[k]) delete DIRTY[k]; });
+      uwrite(DIRTY_KEY, DIRTY);
+      return chunk(i + CARD_CHUNK);
+    });
+  };
+  return chunk(0);
+}
+
+function pushLogs(ep, uid){
+  if(!canSyncUser() || uid !== UID || ep !== USER_EPOCH || !LOGQ.length) return Promise.resolve();
+  const batch = LOGQ.slice(0, CARD_CHUNK).map(function(e){
+    return { user_id:uid, client_id:e.id, card_key:legacyTarget(e.card_key) || e.card_key,
+             rating:e.rating, elapsed_days:numOrNull(e.elapsed_days),
+             duration_ms:clampMs(e.duration_ms), reviewed_at:e.reviewed_at };
+  });
+  const drop = function(){
+    const ids = {};
+    batch.forEach(function(b){ ids[b.client_id] = 1; });
+    LOGQ = LOGQ.filter(function(e){ return !ids[e.id]; });
+    uwrite(LOG_KEY, LOGQ);
+  };
+  return rest('review_log?on_conflict=user_id,client_id', {
+    method:'POST',
+    headers:{Prefer:'resolution=ignore-duplicates,return=minimal'},
+    body:JSON.stringify(batch)
+  }).then(function(r){
+    if(ep !== USER_EPOCH) return;
+    if(r.ok){ drop(); return pushLogs(ep, uid); }
+    return r.text().then(function(t){
+      let code = '';
+      try{ code = String(JSON.parse(t).code || ''); }catch(e){}
+      /* נתון פסול (22xxx/23xxx) ייכשל לנצח ויחסום את כל השאר — נזרק.
+         כל שגיאה אחרת (למשל עמודה שעוד לא קיימת לפני המיגרציה)
+         משאירה את התור לניסיון הבא. */
+      if(r.status === 400 && /^2[23]/.test(code)){
+        logError('sync', 'review_log: נזרקה אצווה פסולה (' + code + ')', {n:batch.length});
+        drop();
+        return pushLogs(ep, uid);
+      }
+      throw new Error('review_log ' + r.status);
+    });
+  });
+}
+
+/* ---------- מפתחות מהתקופה של התוכן המוטמע ----------
+   'fg:methyl' — לפני שהתוכן עבר למסד. אחרי ייבוא ערכת הפתיחה אותו תוכן
+   חי בחבילה עם uuid, והמפתח צריך לעבור איתו, אחרת ההיסטוריה נראית
+   כאילו נמחקה. המיפוי לפי סוג וכותרת, כמו בייבוא. */
+let LEGACY_MAP = {}, LEGACY_PREFIXES = [];
+function refreshLegacyMap(){
+  LEGACY_MAP = {}; LEGACY_PREFIXES = [];
+  if(!UID) return;
+  const owned = {};
+  LIB.rows.forEach(function(r){
+    if(r && r.owner_id === UID && r.id) owned[r.kind + '|' + r.title] = r.id;
+  });
+  localRows().forEach(function(r){
+    const id = owned[r.kind + '|' + (r.title || 'נושא')];
+    if(id){ LEGACY_MAP[r.id + ':'] = id + ':'; LEGACY_PREFIXES.push(r.id + ':'); }
+  });
+}
+function legacyTarget(key){
+  for(let i=0;i<LEGACY_PREFIXES.length;i++){
+    const p = LEGACY_PREFIXES[i];
+    if(key.indexOf(p) === 0) return LEGACY_MAP[p] + key.slice(p.length);
+  }
+  return null;
+}
+function remapLegacyKeys(){
+  refreshLegacyMap();
+  if(!LEGACY_PREFIXES.length) return 0;
+  let moved = 0;
+  Object.keys(CARDS).forEach(function(k){
+    const nk = legacyTarget(k);
+    if(!nk) return;
+    const st = CARDS[k];
+    if(validState(st) && (!CARDS[nk] || st.last > CARDS[nk].last)){ CARDS[nk] = st; DIRTY[nk] = 1; }
+    delete CARDS[k]; delete DIRTY[k];
+    moved++;
+  });
+  LOGQ.forEach(function(e){ const nk = legacyTarget(e.card_key); if(nk){ e.card_key = nk; moved++; } });
+  if(moved) saveCards();
+  return moved;
+}
 
 /* ---------- הגדרות מול השרת ---------- */
 function pullSettings(){
-  if(!canSync() || !AUTH.uid) return Promise.resolve(false);
-  return readJson('user_settings?select=exam_date,rounds&user_id=eq.' + AUTH.uid)
+  if(!canSyncUser()) return Promise.resolve(false);
+  const ep = USER_EPOCH, ver = SETTINGS_VER;
+  return readJson('user_settings?select=exam_date,rounds,updated_at&user_id=eq.' + UID)
     .then(function(res){
-      if(!res.ok || !res.data.length) return false;
+      if(ep !== USER_EPOCH || !res.ok) return false;
       const row = res.data[0];
-      store.examDate = row.exam_date || null;
-      store.rounds   = row.rounds || 0;
-      saveState(store);
-      render();
-      return true;
+      if(!row){
+        /* אין עדיין שורה בשרת — מה שיש כאן הוא המקור */
+        if(store.examDate || store.rounds){ store.dirty = true; saveState(store); }
+        return false;
+      }
+      const at = Date.parse(row.updated_at) || 0;
+      let changed = false;
+      /* שינוי מקומי שעוד לא נשלח לא נדרס; שינוי שנעשה בזמן הבקשה גם לא */
+      if(ver === SETTINGS_VER && at > (store.examAt || 0) && (row.exam_date || null) !== store.examDate){
+        store.examDate = row.exam_date || null; store.examAt = at; changed = true;
+      }
+      const rounds = row.rounds || 0;
+      if(rounds > store.rounds){ store.rounds = rounds; changed = true; }
+      if(rounds < store.rounds && !store.dirty){ store.dirty = true; changed = true; }
+      if(changed){ saveState(store); render(); }
+      return changed;
     });
 }
 
-let pushingSettings = null;
+/* מסונכרן יחיד + סבב נגרר: שינוי שנעשה בזמן שליחה נשלח מיד אחריה.
+   שלוש קריאות בלי שינוי ביניהן = בקשה אחת. */
+let pushingSettings = null, settingsAgain = false;
 function pushSettings(){
-  if(!canSync() || !AUTH.uid) return Promise.resolve(false);
-  /* איחוד כתיבות: שינוי מהיר של תאריך לא שולח שלוש בקשות */
-  if(pushingSettings) return pushingSettings;
+  if(!canSyncUser()) return Promise.resolve(false);
+  if(pushingSettings){ settingsAgain = true; return pushingSettings; }
+  const ep = USER_EPOCH, ver = SETTINGS_VER;
   pushingSettings = rest('user_settings?on_conflict=user_id', {
     method:'POST',
-    headers: Object.assign(restHeaders(), {Prefer:'resolution=merge-duplicates,return=minimal'}),
+    headers:{Prefer:'resolution=merge-duplicates,return=minimal'},
     body: JSON.stringify({
-      user_id:    AUTH.uid,
+      user_id:    UID,
       exam_date:  store.examDate || null,
       rounds:     store.rounds || 0,
-      updated_at: new Date().toISOString()
+      updated_at: new Date(store.examAt || 0).toISOString()
     })
-  }).then(function(r){ pushingSettings = null; return r.ok; })
-    .catch(function(){ pushingSettings = null; return false; });
+  }).then(function(r){ return r.ok; }, function(){ return false; })
+    .then(function(ok){
+      pushingSettings = null;
+      if(ep !== USER_EPOCH) return false;
+      if(ok && ver === SETTINGS_VER){ store.dirty = false; saveState(store); }
+      const again = settingsAgain && ver !== SETTINGS_VER;
+      settingsAgain = false;
+      return again ? pushSettings() : ok;
+    });
   return pushingSettings;
+}
+
+/* קודם שולחים מה שהשתנה כאן, ואז מושכים — כך שינוי אופליין לא נבלע */
+function syncSettings(){
+  const first = store.dirty ? pushSettings() : Promise.resolve(true);
+  return first.then(function(){ return pullSettings(); }).catch(function(){ return false; });
 }
 
 /* ===========================================================
@@ -1520,28 +1986,40 @@ function mistakesText(q){
 /* ===========================================================
    יומן תקלות. כל כישלון שהיה נבלע בשקט נרשם — מקומית מיד, ולשרת
    כשיש חיבור. אדמין קורא את הכול, משתמש רגיל רק את שלו (RLS).
+   כל רשומה נושאת את המשתמש ואת הזמן שבהם קרתה, לא את אלה של רגע
+   השליחה — תקלה אופליין לא תיראה כאילו קרתה כשהרשת חזרה.
    =========================================================== */
 const ERRQ_KEY = 'shinun-errq';
-const ERR_APP  = (document.querySelector('meta[name="app-build"]') || {}).content || 'dev';
+const ERR_APP  = ((document.querySelector('meta[name="app-build"]') || {}).content || 'dev').slice(0, 40);
+const ERR_KINDS = ['client','fetch','function','promise','sync'];
 let ERRQ = jread(ERRQ_KEY, []);
-let logging = false;              /* מונע לולאה: כישלון בדיווח לא מדווח */
+if(!Array.isArray(ERRQ)) ERRQ = [];
+let logging = false;              /* שליחה בטיסה; קריאה נוספת רק מסמנת סבב נגרר */
+let loggingAgain = false;
 const recent = {};                /* דחיית כפילויות בטווח דקה */
 
+function curScreen(){ try{ return view && view.name; }catch(e){ return null; } }
+
 function logError(kind, message, context){
-  if(logging) return;
   const msg = String(message || '').slice(0, 500);
   if(!msg) return;
+  if(ERR_KINDS.indexOf(kind) < 0) kind = 'client';
   const sig = kind + '|' + msg;
   const now = Date.now();
   if(recent[sig] && now - recent[sig] < 60000) return;
   recent[sig] = now;
 
+  let ctx = Object.assign({screen: curScreen(), url: location.pathname}, context || {});
+  try{ if(JSON.stringify(ctx).length > 3000) ctx = {screen: curScreen(), truncated: true}; }
+  catch(e){ ctx = {screen: curScreen()}; }
   const row = {
     kind: kind,
     message: msg,
-    context: Object.assign({screen: view && view.name, url: location.pathname}, context || {}),
+    context: ctx,
     user_agent: navigator.userAgent.slice(0, 300),
-    app: ERR_APP
+    app: ERR_APP,
+    at: new Date(now).toISOString(),
+    uid: UID || null              /* מקומי בלבד — לא נשלח כעמודה */
   };
   ERRQ.push(row);
   if(ERRQ.length > 100) ERRQ = ERRQ.slice(-100);   /* לא נותנים לתור לתפוח */
@@ -1550,30 +2028,55 @@ function logError(kind, message, context){
 }
 
 function checkAdmin(){
-  if(!canSync() || !AUTH.uid) return Promise.resolve(false);
-  return rest('rpc/is_admin', {method:'POST', headers:restHeaders(), body:'{}'})
-    .then(function(r){ return r.ok ? r.json() : false; })
-    .then(function(v){
-      const was = AUTH.admin;
-      AUTH.admin = !!v; authWrite(AUTH);
+  if(!canSyncUser()) return Promise.resolve(false);
+  const ep = USER_EPOCH;
+  return rest('rpc/is_admin', {method:'POST', body:'{}'})
+    .then(function(r){
+      return r.ok ? r.json().then(function(v){ return {ok:true, v:v}; }) : {ok:false};
+    })
+    .then(function(res){
+      /* רק תשובה מפורשת משנה הרשאה. תקלה חולפת לא מורידה אדמין. */
+      if(!res.ok || ep !== USER_EPOCH || !AUTH) return !!(AUTH && AUTH.admin);
+      const was = !!AUTH.admin;
+      AUTH.admin = res.v === true; authWrite(AUTH);
       if(was !== AUTH.admin) render();
+      if(AUTH.admin) loadAdminBadge();
       return AUTH.admin;
-    }).catch(function(){ return false; });
+    }).catch(function(){ return !!(AUTH && AUTH.admin); });
 }
 
+/* השליחה עצמה שקטה: כישלון בדיווח לא מדווח, וזה מה שמונע לולאה.
+   תקלות אחרות שקורות בזמן השליחה נרשמות כרגיל ויוצאות בסבב הבא. */
 function flushErrors(){
-  if(logging || !ERRQ.length || !canSync() || !AUTH.uid) return Promise.resolve();
+  if(logging){ loggingAgain = true; return Promise.resolve(); }
+  if(!ERRQ.length || !canSyncUser()) return Promise.resolve();
+  const uid = UID;
+  /* רשומה של משתמש אחר מחכה לו; רשומה בלי משתמש נרשמת על הנוכחי */
+  const mine = ERRQ.filter(function(r){ return r && (!r.uid || r.uid === uid); }).slice(0, 20);
+  if(!mine.length) return Promise.resolve();
   logging = true;
-  const batch = ERRQ.slice(0, 20).map(function(r){
-    return Object.assign({user_id: AUTH.uid}, r);
+  const body = mine.map(function(r){
+    return { user_id: uid, kind: ERR_KINDS.indexOf(r.kind) > -1 ? r.kind : 'client',
+             message: String(r.message || '').slice(0, 500), context: r.context || null,
+             user_agent: r.user_agent ? String(r.user_agent).slice(0, 300) : null,
+             app: r.app ? String(r.app).slice(0, 40) : null,
+             at: r.at || new Date().toISOString() };
   });
+  const drop = function(){
+    ERRQ = ERRQ.filter(function(r){ return mine.indexOf(r) < 0; });
+    jwrite(ERRQ_KEY, ERRQ);
+  };
   return rest('error_log', {
-    method:'POST',
-    headers: Object.assign(restHeaders(), {Prefer:'return=minimal'}),
-    body: JSON.stringify(batch)
+    method:'POST', quiet:true,
+    headers:{Prefer:'return=minimal'},
+    body: JSON.stringify(body)
   }).then(function(r){
-    if(r.ok){ ERRQ = ERRQ.slice(batch.length); jwrite(ERRQ_KEY, ERRQ); }
-  }).catch(function(){}).then(function(){ logging = false; });
+    /* רשומה שהשרת ידחה תמיד (אילוץ) לא תחסום את התור לנצח */
+    if(r.ok || r.status === 400 || r.status === 409 || r.status === 422) drop();
+  }).catch(function(){}).then(function(){
+    logging = false;
+    if(loggingAgain){ loggingAgain = false; return flushErrors(); }
+  });
 }
 
 addEventListener('error', function(e){
@@ -1581,6 +2084,7 @@ addEventListener('error', function(e){
 });
 addEventListener('unhandledrejection', function(e){
   const r = e.reason;
+  if(r && r.quiet) return;
   logError('promise', (r && r.message) || String(r), null);
 });
 
@@ -1594,46 +2098,69 @@ function logFetch(where, res, extra){
 
 /* ===========================================================
    ספריית התוכן — מקור האמת ב-Postgres, מראה מקומי לאופליין.
-   "הספרייה שלי" = החבילות שאני רשום אליהן. חבילה ציבורית נראית
-   לכל מחובר; פרטית רק לבעלים. שתי המדיניות נאכפות ב-RLS.
+   "הספרייה שלי" = החבילות שאני בעלים שלהן או רשום אליהן. חבילה
+   ציבורית שאושרה נראית לכל מחובר; פרטית רק לבעלים. נאכף ב-RLS.
    =========================================================== */
-const ROWS_KEY = 'shinun-rows';
 /* מצב הספרייה מפורש. 'unknown' אינו 'ריק' — זו ההפרדה שכל הבאגים
-   של המערכת נבעו מהיעדרה. רק 'ok' הוא תשובה מחייבת. */
+   של המערכת נבעו מהיעדרה. רק 'ok' הוא תשובה מחייבת.
+   gen עולה בכל טעינה; תשובה ישנה שמגיעה אחרי חדשה נזרקת. */
 const LIB = {
-  status: jread(ROWS_KEY, null) ? 'cached' : 'unknown',   /* unknown · cached · ok · error */
-  rows:   jread(ROWS_KEY, null) || [],
-  reason: null
+  status: 'unknown',             /* unknown · cached · ok · error */
+  rows:   [],
+  reason: null,
+  subs:   null,                  /* מזהי המינויים מהטעינה האחרונה */
+  gen:    0,
+  at:     0                      /* מתי התקבלה תשובה מחייבת */
 };
-let pendingShare = null;                 /* נושא שהגיע בקישור לפני התחברות */
+let pendingShare = null;         /* נושא שהגיע בקישור — נפתח אחרי הטעינה */
 
+const REST_TIMEOUT = 30000;
 function rest(path, init, retried){
-  const where = (init && init.method ? init.method : 'GET') + ' ' + path.split('?')[0];
+  init = init || {};
+  const quiet = !!init.quiet;
+  const where = (init.method || 'GET') + ' ' + path.split('?')[0];
+  let timer = null;
   return ensureToken().then(function(){
-    return fetch(CFG.supabaseUrl + '/rest/v1/' + path,
-      Object.assign({}, init || {}, {headers: restHeaders()}));
+    if(!canSync()){ const e = new Error('לא מחובר'); e.quiet = true; throw e; }
+    const opts = Object.assign({}, init);
+    delete opts.quiet;
+    /* כותרות הקורא (Prefer למשל) נשמרות; ההרשאה הטרייה גוברת על ישנה.
+       פעם הכותרות הוחלפו כולן, וכל upsert הפך להוספה שנדחתה ב-409. */
+    opts.headers = Object.assign({}, init.headers || {}, restHeaders());
+    if(typeof AbortController === 'function' && !opts.signal){
+      const ctl = new AbortController();
+      opts.signal = ctl.signal;
+      timer = setTimeout(function(){ ctl.abort(); }, REST_TIMEOUT);
+    }
+    return fetch(CFG.supabaseUrl + '/rest/v1/' + path, opts);
   }).then(function(r){
+    if(timer){ clearTimeout(timer); timer = null; }
     /* 401 אחרי רענון מקדים = הטוקן באמת פסול; מנסים רענון אחד ואז נכנעים */
     if(r.status === 401 && !retried){
       if(!AUTH || !AUTH.refresh){
-        logError('fetch', where + ' → 401 בלי טוקן רענון', {hasAuth:!!AUTH});
+        if(!quiet) logError('fetch', where + ' → 401 בלי טוקן רענון', {hasAuth:!!AUTH});
         return r;
       }
       return ensureToken(true).then(function(ok){
         if(!ok){
-          logError('fetch', where + ' → 401 והרענון נכשל', {exp:tokenExp()});
+          if(!quiet) logError('fetch', where + ' → 401 והרענון נכשל', {exp:tokenExp()});
           return r;
         }
         return rest(path, init, true);
       });
     }
     if(r.status === 401 && retried){
-      logError('fetch', where + ' → 401 גם אחרי רענון', {exp:tokenExp(), uid:!!(AUTH && AUTH.uid)});
+      if(!quiet) logError('fetch', where + ' → 401 גם אחרי רענון', {exp:tokenExp(), uid:!!(AUTH && AUTH.uid)});
       return r;
     }
-    return logFetch(where, r);
+    return quiet ? r : logFetch(where, r);
   }).catch(function(err){
-    logError('fetch', where + ' → ' + (err && err.message ? err.message : 'נכשל'), null);
+    if(timer){ clearTimeout(timer); timer = null; }
+    /* אופליין הוא מצב, לא תקלה — לא ממלאים את היומן ברעש */
+    const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+    if(!quiet && !(err && err.quiet) && !offline)
+      logError('fetch', where + ' → ' + (err && err.name === 'AbortError' ? 'timeout' :
+               (err && err.message ? err.message : 'נכשל')), null);
     throw err;
   });
 }
@@ -1642,14 +2169,14 @@ function rest(path, init, retried){
    שתי שאילתות מפורשות ולא embed: embed שמחזיר null היה מרוקן את
    הספרייה ומוחק את המראה המקומי. האיחוד גם מבטיח שנושא בבעלותי
    יופיע גם אם רשומת המינוי חסרה. */
-const DECK_COLS = 'id,kind,title,subtitle,color,visibility,data,item_count,owner_id';
+const DECK_COLS = 'id,kind,title,subtitle,color,visibility,data,item_count,owner_id,created_at,updated_at';
 
 /* כל קריאה מרוחקת מחזירה {ok, data} או {ok:false, reason}. לעולם לא
-   מערך חשוף, שאי אפשr להבדיל בו בין "ריק" ל"לא הצלחתי לשאול". */
-function readJson(path){
-  return rest(path)
+   מערך חשוף, שאי אפשר להבדיל בו בין "ריק" ל"לא הצלחתי לשאול". */
+function readJson(path, init){
+  return rest(path, init)
     .then(function(r){
-      if(!r.ok) return {ok:false, reason:'HTTP ' + r.status};
+      if(!r.ok) return {ok:false, reason:'HTTP ' + r.status, status:r.status};
       return r.json().then(function(d){ return {ok:true, data:d}; });
     })
     .catch(function(e){ return {ok:false, reason:(e && e.message) || 'שגיאת רשת'}; });
@@ -1657,60 +2184,97 @@ function readJson(path){
 
 function fetchLibrary(){
   if(!canSync())   return Promise.resolve({ok:false, reason:'אין חיבור'});
-  if(!AUTH.uid)    return Promise.resolve({ok:false, reason:'זהות לא נפתרה'});
+  if(!UID || authUid() !== UID) return Promise.resolve({ok:false, reason:'זהות לא נפתרה'});
+  const uid = UID;
 
-  return readJson('decks?select=' + DECK_COLS + '&owner_id=eq.' + AUTH.uid)
-    .then(function(mine){
-      if(!mine.ok) return mine;
-      return fetchSubs().then(function(subs){
-        if(!subs.ok) return subs;
-        if(!subs.data.length) return {ok:true, data:mine.data};
-        return readJson('decks?select=' + DECK_COLS + '&id=in.(' + subs.data.join(',') + ')')
-          .then(function(sub){
-            if(!sub.ok) return sub;
-            const byId = {};
-            mine.data.concat(sub.data).forEach(function(d){ if(d && d.id) byId[d.id] = d; });
-            return {ok:true, data:Object.keys(byId).map(function(k){ return byId[k]; })};
-          });
+  /* השאילתות לא תלויות זו בזו — במקביל */
+  return Promise.all([
+    readJson('decks?select=' + DECK_COLS + '&owner_id=eq.' + uid + '&order=created_at.asc'),
+    fetchSubs()
+  ]).then(function(r){
+    const mine = r[0], subs = r[1];
+    if(!mine.ok) return mine;
+    if(!subs.ok) return subs;
+    const own = {};
+    mine.data.forEach(function(d){ if(d && d.id) own[d.id] = 1; });
+    const others = subs.data.filter(function(id){ return !own[id]; });
+    if(!others.length) return {ok:true, data:mine.data, subs:subs.data};
+    return readJson('decks?select=' + DECK_COLS + '&id=in.(' + others.join(',') + ')&order=created_at.asc')
+      .then(function(sub){
+        if(!sub.ok) return sub;
+        const byId = {};
+        mine.data.concat(sub.data).forEach(function(d){ if(d && d.id) byId[d.id] = d; });
+        return {ok:true, data:Object.keys(byId).map(function(k){ return byId[k]; }), subs:subs.data};
       });
+  });
+}
+
+/* המאגר הציבורי — רק מה שאושר. לפני מיגרציה 0006 אין עמודת אישור,
+   ואז כל ציבורית נחשבת מאושרת (כך זה עבד עד עכשיו). */
+function fetchStore(){
+  if(!canSyncUser()) return Promise.resolve({ok:false, reason:'אין חיבור'});
+  const base = 'decks?select=id,kind,title,subtitle,item_count,owner_id,visibility,updated_at';
+  return readJson(base + ',review_status&visibility=eq.public&review_status=eq.approved&order=updated_at.desc',
+                  {quiet:true})
+    .then(function(res){
+      if(res.ok || res.status !== 400) return res;
+      return readJson(base + '&visibility=eq.public&order=updated_at.desc');
+    });
+}
+function fetchMine(){
+  if(!canSyncUser()) return Promise.resolve({ok:false, reason:'אין חיבור'});
+  return readJson('decks?select=id,kind,title,subtitle,item_count,owner_id,visibility,created_at,updated_at'
+                  + '&owner_id=eq.' + UID + '&order=created_at.asc');
+}
+function fetchSubs(){
+  if(!canSync() || !UID) return Promise.resolve({ok:false, reason:'אין חיבור'});
+  /* סינון מפורש ולא רק RLS — מדיניות רחבה יותר (אדמין) לא תזרים לכאן
+     מינויים של אחרים */
+  return readJson('deck_subscriptions?select=deck_id&user_id=eq.' + UID).then(function(res){
+    if(!res.ok) return res;
+    return {ok:true, data:res.data.map(function(x){ return x.deck_id; })};
+  });
+}
+/* מצב האישור של הנושאים שלי. לפני המיגרציה פשוט אין — ולא מציגים */
+function fetchReviewStatus(){
+  if(!canSyncUser()) return Promise.resolve({});
+  return readJson('decks?select=id,review_status,review_note&owner_id=eq.' + UID, {quiet:true})
+    .then(function(res){
+      const out = {};
+      if(res.ok) res.data.forEach(function(d){ out[d.id] = d; });
+      return out;
     });
 }
 
-function fetchStore(){
-  if(!canSync()) return Promise.resolve([]);
-  return rest('decks?select=id,kind,title,subtitle,item_count,owner_id,visibility,updated_at'
-              + '&visibility=eq.public&order=updated_at.desc')
-    .then(function(r){ return r.ok ? r.json() : []; })
-    .catch(function(){ return []; });
-}
-function fetchMine(){
-  if(!canSync() || !AUTH.uid) return Promise.resolve([]);
-  return rest('decks?select=id,kind,title,subtitle,item_count,owner_id,visibility,created_at,updated_at'
-              + '&owner_id=eq.' + AUTH.uid + '&order=created_at.asc')
-    .then(function(r){ return r.ok ? r.json() : []; })
-    .catch(function(){ return []; });
-}
-function fetchSubs(){
-  if(!canSync()) return Promise.resolve({ok:false, reason:'אין חיבור'});
-  return readJson('deck_subscriptions?select=deck_id').then(function(res){
-    if(!res.ok) return res;
-    return {ok:true, data:res.data.map(function(x){ return x.deck_id; })};
+/* פעולה שנכשלה זורקת, עם ההודעה מהשרת. PATCH או DELETE שה-RLS סינן
+   מחזירים 2xx בלי שורות — גם זה כישלון, לא הצלחה. */
+function mustOk(r, expectRows){
+  if(!r.ok) return r.text().then(function(t){
+    let m = t;
+    try{ const j = JSON.parse(t); m = j.message || j.hint || t; }catch(e){}
+    throw new Error(String(m || ('HTTP ' + r.status)).slice(0, 200));
+  });
+  if(!expectRows) return r;
+  return r.json().then(function(rows){
+    if(!Array.isArray(rows) || !rows.length) throw new Error('אין הרשאה, או שהפריט כבר לא קיים');
+    return rows;
   });
 }
 
 function subscribe(deckId){
   return rest('deck_subscriptions', {
     method:'POST',
-    headers: Object.assign(restHeaders(), {Prefer:'resolution=ignore-duplicates,return=minimal'}),
-    body: JSON.stringify({user_id:AUTH.uid, deck_id:deckId})
-  });
+    headers:{Prefer:'resolution=ignore-duplicates,return=minimal'},
+    body: JSON.stringify({user_id:UID, deck_id:deckId})
+  }).then(function(r){ return mustOk(r); });
 }
 function unsubscribe(deckId){
-  return rest('deck_subscriptions?deck_id=eq.' + deckId + '&user_id=eq.' + AUTH.uid,
-              {method:'DELETE', headers:restHeaders()});
+  return rest('deck_subscriptions?deck_id=eq.' + deckId + '&user_id=eq.' + UID, {method:'DELETE'})
+    .then(function(r){ return mustOk(r); });
 }
 function deleteDeck(deckId){
-  return rest('decks?id=eq.' + deckId, {method:'DELETE', headers:restHeaders()});
+  return rest('decks?id=eq.' + deckId, {method:'DELETE', headers:{Prefer:'return=representation'}})
+    .then(function(r){ return mustOk(r, true); });
 }
 
 /* כפילות = אותו סוג ואותה כותרת בבעלות אותו משתמש. שומרים את הראשון
@@ -1726,12 +2290,13 @@ function duplicateDecks(mine){
   return dups;
 }
 
+/* פרסום אצל משתמש רגיל = בקשת אישור; השרת קובע את מצב האישור בעצמו */
 function setVisibility(deckId, vis){
   return rest('decks?id=eq.' + deckId, {
     method:'PATCH',
-    headers: Object.assign(restHeaders(), {Prefer:'return=minimal'}),
+    headers:{Prefer:'return=representation'},
     body: JSON.stringify({visibility:vis})
-  });
+  }).then(function(r){ return mustOk(r, true); });
 }
 
 /* ייבוא ערכת הפתיחה — פעולה מפורשת בלבד. זריעה אוטומטית הייתה יוצרת
@@ -1772,22 +2337,24 @@ function importStarter(){
   if(!canSync()) return Promise.resolve({ok:false, error:'אין חיבור לשרת.'});
 
   /* מפגש שנוצר לפני שהוספנו uid — משלימים אותו לפני שמנסים לכתוב */
-  const ready = AUTH.uid ? Promise.resolve() : loadIdentity();
+  const ready = (AUTH.uid && UID) ? Promise.resolve() : loadIdentity();
 
   return ready.then(function(){
-    if(!AUTH || !AUTH.uid) return {ok:false, error:'לא הצלחתי לזהות את המשתמש. התחבר מחדש.'};
+    if(!AUTH || !AUTH.uid || !canSyncUser()) return {ok:false, error:'לא הצלחתי לזהות את המשתמש. התחבר מחדש.'};
 
     return fetchMine().then(function(existing){
+    /* בלי רשימה אמינה של מה שכבר קיים אי אפשר לדעת מה חסר */
+    if(!existing.ok) return {ok:false, error:'לא הצלחתי לבדוק מה כבר קיים (' + existing.reason + ').'};
     /* דילוג על מה שכבר בבעלותי — לחיצה נוספת לא תיצור כפילות */
     const have = {};
-    (existing||[]).forEach(function(d){ have[d.kind + '|' + d.title] = true; });
-    const rows = starterRows(AUTH.uid).filter(function(r){ return !have[r.kind + '|' + r.title]; });
+    existing.data.forEach(function(d){ have[d.kind + '|' + d.title] = true; });
+    const rows = starterRows(UID).filter(function(r){ return !have[r.kind + '|' + r.title]; });
     if(!rows.length) return {ok:true, count:0, note:'הכול כבר קיים אצלך.'};
     const payload = starterPayload(rows);
 
     return rest('decks', {
       method:'POST',
-      headers: Object.assign(restHeaders(), {Prefer:'return=representation'}),
+      headers:{Prefer:'return=representation'},
       body: JSON.stringify(payload)
     }).then(function(r){
       if(!r.ok) return r.text().then(function(t){
@@ -1800,17 +2367,27 @@ function importStarter(){
       });
       return r.json().then(function(created){
         if(!created || !created.length) return {ok:false, error:'לא נוצרו נושאים.'};
+        const failed = [];
         return Promise.all(created.map(function(d){
           /* התאמה לפי סוג וכותרת ולא לפי מיקום — סדר ההחזרה אינו מובטח */
           const src = rows.filter(function(x){ return x.kind===d.kind && x.title===d.title; })[0];
-          return subscribe(d.id).then(function(){
-            if(!src) return null;
-            return rest('rpc/remap_card_keys', {
-              method:'POST', headers:restHeaders(),
-              body: JSON.stringify({old_prefix: src._oldPrefix, deck: d.id})
+          return subscribe(d.id).catch(function(e){ failed.push(d.title + ': ' + e.message); })
+            .then(function(){
+              if(!src) return null;
+              /* היסטוריה שכבר בשרת תחת המפתח הישן. המקומית עוברת
+                 ב-remapLegacyKeys אחרי שהספרייה נטענת. */
+              return rest('rpc/remap_card_keys', {
+                method:'POST',
+                body: JSON.stringify({old_prefix: src._oldPrefix, deck: d.id})
+              }).catch(function(){});
             });
-          });
-        })).then(function(){ return {ok:true, count:created.length}; });
+        })).then(function(){
+          return syncLibrary().then(function(){ return syncCards(true); });
+        }).then(function(){
+          return failed.length
+            ? {ok:true, count:created.length, note:'חלק מהמינויים נכשלו: ' + failed.join(' · ')}
+            : {ok:true, count:created.length};
+        });
       });
     });
     });
@@ -1821,13 +2398,12 @@ function importStarter(){
   });
 }
 
-/* טעינת הספרייה: מהשרת אם אפשר, אחרת מהמראה המקומי,
-   ואם גם הוא ריק — מהתוכן המוטמע, כדי שהאפליקציה לא תהיה ריקה. */
 /* כל פעולה שמשנה תוכן מסתיימת בסנכרון. בלי זה כל שינוי דורש
    מהמשתמש לרענן ידנית, וזה בדיוק מה שלא אמור לקרות. */
 /* סנכרון שכבר רץ התחיל לפני השינוי, ותשובתו עלולה לא לכלול אותו.
    לכן קריאה בזמן ריצה לא מצטרפת אליו אלא נרשמת לסבב נוסף אחריו —
-   אחד בלבד, שמשרת את כל מי שביקש בינתיים. */
+   אחד בלבד, שמשרת את כל מי שביקש בינתיים. כל טעינה של הספרייה עוברת
+   כאן; קריאה ישירה ל-loadLibrary הייתה עוקפת את התיאום. */
 let syncing = null, syncQueued = null;
 function syncLibrary(){
   if(syncing){
@@ -1850,17 +2426,32 @@ function mutate(work){
     .then(function(out){ return syncLibrary().then(function(){ return out; }); });
 }
 
+function sameRows(a, b){
+  try{ return JSON.stringify(a) === JSON.stringify(b); }catch(e){ return false; }
+}
+
 function loadLibrary(){
+  const gen = ++LIB.gen, ep = USER_EPOCH;
   return fetchLibrary().then(function(res){
+    /* תשובה שהגיעה אחרי טעינה חדשה יותר, או אחרי החלפת משתמש — נזרקת */
+    if(gen !== LIB.gen || ep !== USER_EPOCH) return res;
+    const before = LIB.status + '|' + LIB.reason;
+    let changed = false;
     if(res.ok){
+      changed = !sameRows(LIB.rows, res.data);
       LIB.status = 'ok'; LIB.rows = res.data; LIB.reason = null;
-      jwrite(ROWS_KEY, LIB.rows);
+      LIB.subs = res.subs || []; LIB.at = Date.now();
+      /* מראה שלא נשמר עדיף שיימחק מאשר שיוצג בעתיד כמצב האחרון */
+      if(!uwrite(ROWS_KEY, LIB.rows) && UID !== null) jremove(ukey(ROWS_KEY));
+      remapLegacyKeys();
     } else {
       /* נשארים עם מה שיש — מטמון או ריק — ומסמנים למה */
       LIB.status = LIB.rows.length ? 'cached' : 'error';
       LIB.reason = res.reason;
     }
-    applyRows();
+    /* ציור מחדש רק כשמשהו השתנה — ציור מיותר מפיל פוקוס משדה חיפוש */
+    if(changed) applyRows();
+    else if(before !== LIB.status + '|' + LIB.reason) render();
     return res;
   });
 }
@@ -1876,12 +2467,20 @@ function applyRows(){
    =========================================================== */
 const TOPIC_COLORS = ['var(--c-n)','var(--c-o)','var(--c-p)','var(--c-s)','var(--c-x)'];
 
+/* פריט בלי מזהה תקין, או בלי השדות שהמנוע שלו צריך, היה מפיל את מסך
+   הבית בכל פתיחה — ואיתו את הדרך היחידה לתקן. מסננים אותו כאן. */
+function okId(x){ return isObj(x) && (typeof x.id === 'string' ? x.id.length > 0 : isFinite(x.id)); }
+function cleanItems(arr, extra){
+  return (Array.isArray(arr) ? arr : []).filter(function(x){ return okId(x) && (!extra || extra(x)); });
+}
 function makeDeck(row, idx){
   const key = function(x){ return row.id + ':' + x.id; };
 
   if(row.kind === 'groups'){
-    const items = row.data;
-    return { id:row.id, row:row, title:row.title, sub:row.subtitle||'', color:row.color||'var(--c-o)',
+    const items = cleanItems(row.data, function(g){
+      return Array.isArray(g.a) && Array.isArray(g.b) && g.a.every(function(at){ return isObj(at) && typeof at.t === 'string'; });
+    });
+    return { id:row.id, row:row, title:row.title, sub:row.subtitle||'', color:safeColor(row.color, 'var(--c-o)'),
       items:items, keyFn:key,
       browse:function(g){ return {mol:g, title:g.en, ltr:true, sub:g.he,
                                   tag:(CATS[g.cat]||{}).he, tagColor:(CATS[g.cat]||{}).color}; },
@@ -1896,8 +2495,8 @@ function makeDeck(row, idx){
   }
 
   if(row.kind === 'elements'){
-    const items = row.data;
-    return { id:row.id, row:row, title:row.title, sub:row.subtitle||'', color:row.color||'var(--c-n)',
+    const items = cleanItems(row.data, function(e){ return typeof e.sym === 'string'; });
+    return { id:row.id, row:row, title:row.title, sub:row.subtitle||'', color:safeColor(row.color, 'var(--c-n)'),
       items:items, keyFn:key,
       browse:function(e){ return {sym:e.sym, title:e.he, sub:e.en, body:e.role,
                                   tag:e.cat==='bulk'?'עיקרי':'קורט',
@@ -1913,9 +2512,10 @@ function makeDeck(row, idx){
   }
 
   if(row.kind === 'iso'){
-    const D = {iso:row.data.iso||[], isoTerms:row.data.isoTerms||[], isoPairs:row.data.isoPairs||[]};
+    const src = isObj(row.data) ? row.data : {};
+    const D = {iso:cleanItems(src.iso), isoTerms:cleanItems(src.isoTerms), isoPairs:cleanItems(src.isoPairs)};
     D.all = D.iso.concat(D.isoTerms);
-    return { id:row.id, row:row, title:row.title, sub:row.subtitle||'', color:row.color||'var(--c-p)',
+    return { id:row.id, row:row, title:row.title, sub:row.subtitle||'', color:safeColor(row.color, 'var(--c-p)'),
       items:D.all, keyFn:key, map:D.iso.length ? D : null,
       browse:function(n){
         const parent = n.parent ? (D.iso.filter(function(x){return x.id===n.parent;})[0]||{}).he : '';
@@ -1938,11 +2538,14 @@ function makeDeck(row, idx){
 
   /* topic — המנוע הגנרי. כרטיסים ותרגילים חיים באותו מערך. כרטיסים
      נכנסים לסבב רק מארבעה ומעלה, כי צריך שלושה מסיחים; תרגיל עומד לבד. */
-  const all   = Array.isArray(row.data) ? row.data : (row.data.cards || []);
-  const acts  = all.filter(activityOk);
-  const found = all.filter(function(c){ return c && !c.type; });
+  const all   = Array.isArray(row.data) ? row.data : ((isObj(row.data) && row.data.cards) || []);
+  const acts  = all.filter(function(c){ return okId(c) && activityOk(c); });
+  const found = all.filter(function(c){ return okId(c) && !c.type; });
   const cards = found.length >= 4 ? found : [];
-  const color = row.color || TOPIC_COLORS[idx % TOPIC_COLORS.length];
+  /* צבע ברירת מחדל לפי המזהה ולא לפי המיקום — אחרת הצבעים מתחלפים
+     כשהסדר משתנה */
+  const color = safeColor(row.color,
+    TOPIC_COLORS[parseInt(hashStr(String(row.id)), 36) % TOPIC_COLORS.length]);
   const modes = [];
   if(cards.length) modes.push(
     {id:'f2b', glyph:'→', title:'מושג ← הסבר', desc:'רואה מושג, בוחר את ההסבר'},
@@ -1980,12 +2583,23 @@ function makeDeck(row, idx){
 
 /* חבילה צריכה ארבעה פריטים לפחות כדי לייצר ארבע אפשרויות. נושא מסנן
    בעצמו ומסמן min:1, כי תרגיל אחד כבר מספיק לסבב. */
+/* שורה פגומה מדולגת ונרשמת, ולא מפילה את כל הספרייה */
+const badRows = {};
 function buildDecks(rows){
-  return rows
-    .map(function(r, i){ return makeDeck(r, i); })
-    .filter(function(d){
-      return d.items && d.modes.length && d.items.length >= (d.min || 4);
-    });
+  const out = [];
+  (Array.isArray(rows) ? rows : []).forEach(function(r, i){
+    if(!isObj(r) || !r.id) return;
+    try{
+      const d = makeDeck(r, i);
+      if(d.items && d.modes.length && d.items.length >= (d.min || 4)) out.push(d);
+    }catch(e){
+      if(!badRows[r.id]){
+        badRows[r.id] = 1;
+        logError('client', 'חבילה פגומה דולגה: ' + ((e && e.message) || e), {deck:String(r.id).slice(0,40)});
+      }
+    }
+  });
+  return out;
 }
 
 /* מקור התוכן. בשלב זה עדיין מהחבילה המוטמעת; ההחלפה למסד תבוא בנפרד. */
@@ -2019,6 +2633,8 @@ const app = document.getElementById('app');
 
 function startQuiz(deckId, mode){
   const deck = deckById(deckId);
+  /* החבילה נעלמה בסנכרון ברקע (נמחקה, הוסתרה, בוטל מינוי) */
+  if(!deck){ quiz = null; view = {name:'home'}; render(); return; }
   const qs = deck.build(mode);
   quiz = {deck:deck, mode:mode, qs:qs, i:0, correct:0, misses:[]};
   view = {name:'quiz'};
@@ -2090,8 +2706,7 @@ function scheduleReview(q, grade, ms){
 function next(){
   if(quiz.i < quiz.qs.length-1){ quiz.i++; }
   else{
-    store.rounds = (store.rounds||0)+1;
-    saveState(store);
+    bumpRounds();
     pushSettings();
     quiz.done = true;
   }
@@ -2109,6 +2724,7 @@ function icon(kind){
   if(kind==='send') return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 4 3 11l7 2 2 7z"/><path d="M20 4 10 13"/></svg>';
   if(kind==='camera') return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5A1.5 1.5 0 0 1 4.5 7h2.2l1.2-2h8.2l1.2 2h2.2A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/><circle cx="12" cy="13" r="3.4"/></svg>';
   if(kind==='wrench') return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0 5 5l-8.4 8.4a2.1 2.1 0 0 1-3-3z"/><path d="M19.7 11.3 21 6l-2.5.7L17 4l-2.3 2.3"/></svg>';
+  if(kind==='shield') return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>';
   if(kind==='plus') return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
   return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 6l-6 6 6 6"/></svg>';
 }
@@ -2139,19 +2755,19 @@ function openExamSheet(){
   bg.querySelector('#exClose').addEventListener('click', close);
   bg.querySelector('#exSave').addEventListener('click', function(){
     const v = bg.querySelector('#exDate').value;
-    store.examDate = v || null; saveState(store); pushSettings(); close(); render();
+    setExamDate(v); pushSettings(); close(); render();
   });
   const clr = bg.querySelector('#exClear');
   if(clr) clr.addEventListener('click', function(){
-    store.examDate = null; saveState(store); pushSettings(); close(); render();
+    setExamDate(null); pushSettings(); close(); render();
   });
 }
 
 function renderHome(){
   const cards = DECKS.map(function(d){
     const due = dueCount(d.items, d.keyFn);
-    return '<button class="deck-card" data-deck="'+d.id+'">'+
-      '<span class="dot" style="background:'+d.color+'"></span>'+
+    return '<button class="deck-card" data-deck="'+esc(d.id)+'">'+
+      '<span class="dot" style="background:'+safeColor(d.color)+'"></span>'+
       '<span class="txt"><strong>'+esc(d.title)+'</strong><span>'+esc(d.sub)+'</span></span>'+
       '<span class="prog"><b>'+due+'</b>לחזרה</span>'+
     '</button>';
@@ -2174,11 +2790,11 @@ function renderHome(){
       '<div class="stat"><b>'+(store.rounds||0)+'</b><span>סבבים</span></div>'+
     '</button>'+
     /* 'cached' הוא גם מצב הפתיחה, לפני שבכלל פנינו לשרת. רק reason
-       מעיד על ניסיון שנכשל — בלעדיו האזהרה הופיעה בכל כניסה. */
+       מעיד על ניסיון שנכשל — בלעדיו האזהרה הופיעה בכל כניסה. אין כאן
+       כפתור: הסנכרון חוזר לבד כשהרשת חוזרת, בחזרה לאפליקציה ובמרווחים. */
     (LIB.status === 'cached' && LIB.reason && canSync()
       ? '<div class="lib-warn">מוצג מהמטמון המקומי — לא הצלחתי לרענן מהשרת'+
-          ' ('+esc(LIB.reason)+').'+
-          '<button id="refreshLib">רענן</button></div>'
+          ' ('+esc(LIB.reason)+'). אנסה שוב אוטומטית.</div>'
       : '')+
     (!DECKS.length
       ? (LIB.status === 'error'
@@ -2209,6 +2825,10 @@ function renderHome(){
     (CFG.editAppUrl && AUTH && AUTH.editor
       ? '<button class="lab-entry" id="labBtn">'+icon('wrench')+' מעבדה — שינוי האפליקציה עצמה</button>'
       : '')+
+    (AUTH && AUTH.admin
+      ? '<button class="lab-entry" id="adminBtn">'+icon('shield')+' ניהול'+
+          (ADMIN.pending ? ' · <b>'+ADMIN.pending+'</b> ממתינים לאישור' : '')+'</button>'
+      : '')+
     (authEnabled && AUTH
       ? '<div class="acct">מחובר כ־<b>'+esc(AUTH.email||'…')+'</b> · <button id="outBtn">התנתק</button></div>'
       : '')+
@@ -2226,16 +2846,13 @@ function renderHome(){
   const go = app.querySelector('#goBtn');
   if(go) go.addEventListener('click', startMixed);
   app.querySelector('#examBtn').addEventListener('click', openExamSheet);
-  const rf = app.querySelector('#refreshLib');
-  if(rf) rf.addEventListener('click', function(){
-    rf.disabled = true; rf.textContent = 'מרענן…';
-    (AUTH && AUTH.uid ? Promise.resolve() : loadIdentity()).then(loadLibrary);
-  });
+  const adm = app.querySelector('#adminBtn');
+  if(adm) adm.addEventListener('click', function(){ openAdmin(); });
   const rt = app.querySelector('#retryLib');
   if(rt) rt.addEventListener('click', function(){
     rt.disabled = true; rt.textContent = 'טוען…';
     LIB.status = 'unknown'; render();
-    (AUTH && AUTH.uid ? Promise.resolve() : loadIdentity()).then(loadLibrary);
+    syncAll(true);
   });
   const sb = app.querySelector('#storeBtn');
   if(sb) sb.addEventListener('click', function(){ openStore(); });
@@ -2247,21 +2864,25 @@ function renderHome(){
 /* חבילה שלי = יש לה שורה במסד ואני הבעלים. חבילה מקומית (לפני זריעה)
    אינה ניתנת לשיתוף, כי אין לה קיום בשרת. */
 function mineDeck(d){
-  return !!(d.row && d.row.owner_id && AUTH && d.row.owner_id === AUTH.uid);
+  return !!(d.row && d.row.owner_id && UID && d.row.owner_id === UID);
 }
+
+/* חבילה שנעלמה בסנכרון ברקע — חוזרים הביתה במקום לקרוס */
+function goneHome(){ quiz = null; view = {name:'home'}; renderHome(); }
 
 function renderDeck(){
   const d = deckById(view.deck);
+  if(!d) return goneHome();
   const m = masteredCount(d.items, d.keyFn);
   const due = dueCount(d.items, d.keyFn);
   const modes = d.modes.map(function(mo){
-    return '<button class="mode" data-mode="'+mo.id+'">'+
+    return '<button class="mode" data-mode="'+esc(mo.id)+'">'+
       '<span class="glyph">'+esc(mo.glyph)+'</span>'+
       '<span class="txt"><strong>'+esc(mo.title)+'</strong><span>'+esc(mo.desc)+'</span></span>'+
       '<span class="arrow">'+icon('arrow')+'</span></button>';
   }).join('');
   const legend = d.legend.map(function(l){
-    return '<span><i style="background:'+l.color+'"></i>'+esc(l.he)+'</span>';
+    return '<span><i style="background:'+safeColor(l.color)+'"></i>'+esc(l.he)+'</span>';
   }).join('');
 
   app.innerHTML =
@@ -2358,7 +2979,7 @@ function chipHTML(q, c){
   /* מה שנשאר בבנק לא שובץ לא נכון — הוא פשוט חסר, והמקום שלו מסומן ביעד */
   if(q.answered) cls += q.result.marks[c.id] ? ' ok' : q.place[c.id] ? ' bad' : ' miss';
   else if(q.sel === c.id) cls += ' sel';
-  return '<button class="'+cls+'" data-chip="'+c.id+'"'+
+  return '<button class="'+cls+'" data-chip="'+esc(c.id)+'"'+
     (q.answered ? ' disabled' : ' draggable="true" aria-pressed="'+(q.sel === c.id)+'"')+'>'+
     unbroken(c.text)+'</button>';
 }
@@ -2369,9 +2990,9 @@ function canCls(q, zone){
 function slotHTML(q, t, name){
   const inside = chipsIn(q, t.id)[0];
   const wrong = q.answered && (!inside || !q.result.marks[inside.id]);
-  return '<div class="slot'+canCls(q, t.id)+'" data-zone="'+t.id+'">'+
+  return '<div class="slot'+canCls(q, t.id)+'" data-zone="'+esc(t.id)+'">'+
       (inside ? chipHTML(q, inside)
-              : '<button class="hole" data-zone="'+t.id+'" aria-label="'+esc(name)+' — ריק"'+
+              : '<button class="hole" data-zone="'+esc(t.id)+'" aria-label="'+esc(name)+' — ריק"'+
                   (q.answered ? ' disabled' : '')+'></button>')+
     '</div>'+
     (wrong ? '<span class="fix">'+unbroken(t.expect[0])+'</span>' : '');
@@ -2405,8 +3026,8 @@ function groupsHTML(q){
         return '<span class="chip-a ghost">'+unbroken(x)+'</span>';
       }).join('');
     }
-    return '<div class="grp'+canCls(q, g.id)+'" data-zone="'+g.id+'">'+
-      '<button class="grp-hd" data-zone="'+g.id+'"'+(q.answered ? ' disabled' : '')+'>'+
+    return '<div class="grp'+canCls(q, g.id)+'" data-zone="'+esc(g.id)+'">'+
+      '<button class="grp-hd" data-zone="'+esc(g.id)+'"'+(q.answered ? ' disabled' : '')+'>'+
         unbroken(g.label)+(g.sub ? '<small>'+esc(g.sub)+'</small>' : '')+'</button>'+
       '<div class="chips-a">'+inside.map(function(c){ return chipHTML(q, c); }).join('')+missing+'</div>'+
     '</div>';
@@ -2555,7 +3176,7 @@ function activityFooter(q){
     (!ok && CFG.explainUrl && AUTH && AUTH.editor
       ? '<button class="why-btn" id="whyBtn">'+(q.whyBusy ? '…' : 'למה?')+'</button>' : '')+
     '<button class="next" id="nextBtn">הבא</button></div>';
-  const cached = !ok && (q.whyText || whyFor(q.key));
+  const cached = !ok && (q.whyText || whyFor(whyKeyOf(q)));
   if(cached) fb += '<div class="why">'+esc(cached)+'</div>';
   return fb;
 }
@@ -2574,7 +3195,7 @@ function renderQuiz(){
     opts = '<div class="opts grid">'+q.options.map(function(o){
       let cls='opt pic';
       if(answered){ cls += o.id===q.answer ? ' correct' : (o.id===q.answered ? ' wrong' : ' dim'); }
-      return '<button class="'+cls+'" data-id="'+o.id+'"'+(answered?' disabled':'')+'>'+
+      return '<button class="'+cls+'" data-id="'+esc(o.id)+'"'+(answered?' disabled':'')+'>'+
         molSVG(o.mol,{alt:'אפשרות מבנה'})+'</button>';
     }).join('')+'</div>';
   } else {
@@ -2605,7 +3226,7 @@ function renderQuiz(){
         (CFG.explainUrl && AUTH && AUTH.editor ? '<button class="why-btn" id="whyBtn">'+
           (q.whyBusy?'…':'למה?')+'</button>' : '')+
         '<button class="next" id="nextBtn">הבא</button></div>';
-      const cached = q.whyText || whyFor(q.key);
+      const cached = q.whyText || whyFor(whyKeyOf(q));
       if(cached) fb += '<div class="why">'+esc(cached)+'</div>';
     }
   }
@@ -2636,22 +3257,25 @@ function renderQuiz(){
   if(wb) wb.addEventListener('click', function(){
     /* רק ריצה פעילה או הסבר שכבר התקבל חוסמים. כישלון קודם ניתן לנסות שוב —
        קודם הוא נחסם לצמיתות והכפתור נראה מת. */
-    if(q.whyBusy || whyFor(q.key)) return;
+    if(q.whyBusy || whyFor(whyKeyOf(q))) return;
     q.whyBusy = true; q.whyText = null; renderNow();
 
     const chosen = q.options.filter(function(o){ return o.id===q.answered; })[0];
     const t = explainText(q, correctOpt, chosen);
 
+    /* בסבב מעורב שם הסבב הוא "חזרה כללית" — שולחים את שם הנושא עצמו */
+    const own = deckById(String(q.key).split(':')[0]);
+    const wk = whyKeyOf(q);
     callFn(CFG.explainUrl, {
       question: t.question,
       answer:   t.answer,
       chosen:   t.chosen,
-      deck:     quiz.deck.title
+      deck:     (own || quiz.deck).title
     }).then(function(res){
       q.whyBusy = false;
       if(res.ok && res.body.text){
         q.whyText = res.body.text;
-        whySave(q.key, res.body.text);
+        whySave(wk, res.body.text);
       } else {
         logError('function', 'explain → ' + res.status + ' ' + (res.body.error || ''),
                  {deck:quiz.deck.title, key:q.key});
@@ -2717,7 +3341,7 @@ function renderMap(){
   const D = deck.map || {iso:[], isoTerms:[]};
   const ISO = D.iso, ISO_TERMS = D.isoTerms;
   function nodeHTML(n){
-    return '<div class="node" style="--nc:'+n.color+'"><strong>'+esc(n.he)+'</strong>'+
+    return '<div class="node" style="--nc:'+safeColor(n.color, 'var(--line-2)')+'"><strong>'+esc(n.he)+'</strong>'+
       '<em>'+esc(n.def)+'</em>'+(n.ex?'<span class="ex">'+esc(n.ex)+'</span>':'')+'</div>';
   }
   function childrenOf(id){ return ISO.filter(function(x){ return x.parent===id; }); }
@@ -2757,94 +3381,26 @@ function renderMap(){
    כדי לא להוסיף תלות רשת לאפליקציה שאמורה לעבוד אופליין.
    =========================================================== */
 const AUTH_KEY = 'shinun-auth';
+const SIGNIN_KEY = 'shinun-signin';      /* חותמת: המכשיר הזה התחיל התחברות */
 const authEnabled = !!(CFG.supabaseUrl && CFG.supabaseKey);
 
 function authRead(){
-  try{ const r=localStorage.getItem(AUTH_KEY); return r?JSON.parse(r):null; }catch(e){ return null; }
+  const v = jread(AUTH_KEY, null);
+  return isObj(v) && v.access ? v : null;
 }
+/* טוקן רענון מסובב שלא נשמר = ניתוק בפתיחה הבאה. jwrite מפנה מקום
+   ומנסה שוב לפני שהוא מוותר. */
 function authWrite(v){
-  try{ v ? localStorage.setItem(AUTH_KEY, JSON.stringify(v)) : localStorage.removeItem(AUTH_KEY); }
-  catch(e){}
+  if(!v){ jremove(AUTH_KEY); return true; }
+  return jwrite(AUTH_KEY, v);
 }
 let AUTH = authRead();
 
-/* חזרה מגוגל — הטוקנים מגיעים ב-hash. קולטים, מנקים מה-URL ושומרים. */
-(function absorbHash(){
-  if(!location.hash || location.hash.indexOf('access_token=')<0) return;
-  const p = new URLSearchParams(location.hash.slice(1));
-  const at = p.get('access_token'), rt = p.get('refresh_token');
-  if(at){ AUTH = {access:at, refresh:rt, email:null}; authWrite(AUTH); }
-  history.replaceState(null, '', location.pathname + location.search);
-})();
-
-function signIn(){
-  const back = location.origin + location.pathname;
-  location.href = CFG.supabaseUrl + '/auth/v1/authorize?provider=google'
-    + '&redirect_to=' + encodeURIComponent(back);
-}
-function signOut(){ hardSignOut('התנתקת.'); view = {name:'home', lockErr:null}; render(); }
-
-/* אימות הרשאה מול השרת. רשימת המורשים לא יושבת כאן בכוונה —
-   הקוד הזה ציבורי, והרשימה נשארת ב-ALLOWED_EMAILS בצד השרת. */
-const VERIFY_KEY = 'shinun-verified';
-function verifyAccess(force){
-  if(!CFG.explainUrl || !AUTH || !AUTH.access) return Promise.resolve();
-  let last = 0;
-  try{ last = +(localStorage.getItem(VERIFY_KEY) || 0); }catch(e){}
-  if(!force && Date.now() - last < 6*3600000) return Promise.resolve();  /* אחת לשש שעות */
-  return fetch(CFG.explainUrl, {
-    method:'POST',
-    headers:{'Content-Type':'application/json', Authorization:'Bearer ' + AUTH.access},
-    body: JSON.stringify({verify:true})
-  }).then(function(r){
-    /* 401 = הטוקן עצמו פסול, ורק אז מנתקים. חשבון תקף שאינו ברשימת
-       העורכים נשאר בפנים ופשוט לא רואה את כפתורי העריכה. */
-    if(r.status === 401){
-      /* אולי רק פג. ensureToken ינתק בעצמו אם הרענון נדחה סופית. */
-      return ensureToken(true).then(function(ok){ if(ok) return verifyAccess(true); });
-    }
-    return r.json().catch(function(){ return {}; }).then(function(j){
-      const was = AUTH.editor;
-      AUTH.editor = !!j.editor;
-      authWrite(AUTH);
-      try{ localStorage.setItem(VERIFY_KEY, String(Date.now())); }catch(e){}
-      if(was !== AUTH.editor) render();
-    });
-  }).catch(function(){});   /* אופליין — לא מנתקים */
-}
-
-function loadIdentity(){
-  /* גם uid נדרש, לא רק מייל — מפגש שנוצר לפני שהוספנו אותו חייב רענון */
-  if(!AUTH || !AUTH.access || (AUTH.email && AUTH.uid)) return Promise.resolve();
-  return fetch(CFG.supabaseUrl + '/auth/v1/user', {
-    headers:{ apikey: CFG.supabaseKey, Authorization: 'Bearer ' + AUTH.access }
-  }).then(function(r){ return r.ok ? r.json() : null; })
-    .then(function(u){
-      if(u && u.email){
-        AUTH.email = u.email; AUTH.uid = u.id; authWrite(AUTH); render();
-        verifyAccess(true).then(function(){
-          if(AUTH){
-            pullCards(); flushQueue(); flushErrors(); checkAdmin();
-            loadLibrary().then(function(){
-              if(pendingShare){ const id = pendingShare; pendingShare = null; openStore(id); }
-            });
-          }
-        });
-        return;
-      }
-      /* אולי רק פג — מנסים לרענן לפני שמנתקים */
-      return ensureToken(true).then(function(ok){ if(ok) return loadIdentity(); });
-    }).catch(function(){});   /* אופליין — משאירים את המשתמש בפנים */
-}
-
-/* פענוח exp מתוך ה-JWT. טוקן הגישה חי שעה, ורענון היה ממומש רק
-   בקריאות לפונקציות — ולכן אחרי שעה כל שאילתה למסד חזרה 401
-   והאפליקציה נפלה למטמון בשקט. */
-function tokenExp(){
-  if(!AUTH || !AUTH.access) return 0;
+/* פענוח מטען ה-JWT. uid (sub) ומייל ידועים מתוכו גם בלי רשת. */
+function claims(tok){
   try{
-    const part = AUTH.access.split('.')[1];
-    if(!part) return 0;
+    const part = String(tok || '').split('.')[1];
+    if(!part) return {};
     const pad = part.replace(/-/g,'+').replace(/_/g,'/');
     const bin = atob(pad + '==='.slice((pad.length + 3) % 4));
     /* המטען עלול להכיל תווים לא-ASCII (שם בעברית למשל), ואז JSON.parse
@@ -2855,9 +3411,139 @@ function tokenExp(){
         return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
       }).join(''));
     }catch(e){}
-    const payload = JSON.parse(text);
-    return (payload.exp || 0) * 1000;
-  }catch(e){ return 0; }
+    const p = JSON.parse(text);
+    return isObj(p) ? p : {};
+  }catch(e){ return {}; }
+}
+function authUid(){
+  if(!AUTH) return null;
+  return AUTH.uid || claims(AUTH.access).sub || '';
+}
+function canSync(){ return !!(CFG.supabaseUrl && AUTH && AUTH.access); }
+function restHeaders(){
+  const h = { apikey: CFG.supabaseKey, 'Content-Type': 'application/json' };
+  if(AUTH && AUTH.access) h.Authorization = 'Bearer ' + AUTH.access;
+  return h;
+}
+/* uid ומייל מתוך הטוקן — בלי לחכות ל-/auth/v1/user */
+function fillFromClaims(){
+  if(!AUTH) return;
+  const c = claims(AUTH.access);
+  let changed = false;
+  if(!AUTH.uid && c.sub){ AUTH.uid = c.sub; changed = true; }
+  if(!AUTH.email && c.email){ AUTH.email = c.email; changed = true; }
+  if(changed) authWrite(AUTH);
+}
+
+/* חזרה מגוגל — הטוקנים מגיעים ב-hash. קולטים, מנקים מה-URL ושומרים.
+   רק אם המכשיר הזה ביקש התחברות בחצי השעה האחרונה: אחרת קישור עם
+   טוקנים של מישהו אחר היה מכניס את המכשיר לחשבון שלו בשקט. */
+(function absorbHash(){
+  if(!location.hash || location.hash.indexOf('access_token=')<0) return;
+  const p = new URLSearchParams(location.hash.slice(1));
+  const at = p.get('access_token'), rt = p.get('refresh_token');
+  history.replaceState(null, '', location.pathname + location.search);
+  const started = jread(SIGNIN_KEY, null);
+  jremove(SIGNIN_KEY);
+  if(!at || !isObj(started) || !(Date.now() - (started.t || 0) < 30*60000)) return;
+  const c = claims(at);
+  AUTH = {access:at, refresh:rt, email:c.email || null, uid:c.sub || null, verifiedAt:0};
+  authWrite(AUTH);
+  if(typeof started.deck === 'string') pendingShare = started.deck;
+})();
+
+function signIn(){
+  /* הקישור לנושא ששותף עובר איתנו דרך גוגל ובחזרה */
+  jwrite(SIGNIN_KEY, {t: Date.now(), deck: pendingShare || null});
+  const back = location.origin + location.pathname;
+  location.href = CFG.supabaseUrl + '/auth/v1/authorize?provider=google'
+    + '&redirect_to=' + encodeURIComponent(back);
+}
+/* ביטול המפגש בשרת. scope=local — רק המכשיר הזה; ברירת המחדל של
+   Supabase מנתקת את כל המכשירים. */
+function revoke(tok){
+  if(!tok || !CFG.supabaseUrl) return;
+  try{
+    fetch(CFG.supabaseUrl + '/auth/v1/logout?scope=local', {
+      method:'POST', headers:{ apikey: CFG.supabaseKey, Authorization:'Bearer ' + tok }
+    }).catch(function(){});
+  }catch(e){}
+}
+/* יציאה מפורשת. מה שהשרת יכול להחזיר (ספרייה, הסברים) נמחק מהמכשיר.
+   כרטיסים, תור והגדרות נשארים תחת ה-uid — אולי עוד לא נשלחו — ואינם
+   מוצגים לאף משתמש אחר. */
+function signOut(){
+  revoke(AUTH && AUTH.access);
+  if(UID){ jremove(ukey(ROWS_KEY)); jremove(ukey(EXPLAIN_KEY)); }
+  hardSignOut('התנתקת.');
+  view = {name:'home', lockErr:null};
+  render();
+}
+
+/* אימות הרשאת עורך מול השרת. רשימת המורשים לא יושבת כאן בכוונה —
+   הקוד הזה ציבורי, והרשימה נשארת ב-ALLOWED_EMAILS בצד השרת.
+   רק תשובה מפורשת משנה הרשאה; תקלה בשרת אינה "לא עורך". */
+function verifyAccess(force, retried){
+  if(!CFG.explainUrl || !AUTH || !AUTH.access) return Promise.resolve();
+  if(!force && Date.now() - (AUTH.verifiedAt || 0) < 6*3600000) return Promise.resolve();  /* אחת לשש שעות */
+  const ep = USER_EPOCH;
+  return ensureToken().then(function(){
+    if(!AUTH || ep !== USER_EPOCH) return null;
+    return fetch(CFG.explainUrl, {
+      method:'POST',
+      headers:{'Content-Type':'application/json', Authorization:'Bearer ' + AUTH.access},
+      body: JSON.stringify({verify:true})
+    });
+  }).then(function(r){
+    if(!r || !AUTH || ep !== USER_EPOCH) return;
+    /* 401 = אולי הטוקן פג. רענון אחד וניסיון אחד — לא לולאה. */
+    if(r.status === 401){
+      if(retried) return;
+      return ensureToken(true).then(function(ok){ if(ok) return verifyAccess(true, true); });
+    }
+    if(!r.ok) return;
+    return r.json().then(function(j){
+      if(!AUTH || ep !== USER_EPOCH || !j || typeof j.editor !== 'boolean') return;
+      const was = !!AUTH.editor;
+      AUTH.editor = j.editor;
+      AUTH.verifiedAt = Date.now();
+      authWrite(AUTH);
+      if(was !== AUTH.editor) render();
+    });
+  }).catch(function(){});   /* אופליין — לא משנים כלום */
+}
+
+/* זהות: uid ומייל. בדרך כלל ידועים כבר מהטוקן; פנייה לשרת רק כשחסר.
+   אינה מפעילה סנכרון — זה התפקיד של syncAll. */
+function loadIdentity(retried){
+  if(!AUTH || !AUTH.access) return Promise.resolve();
+  fillFromClaims();
+  if(AUTH.email && AUTH.uid){ bindUser(authUid()); return Promise.resolve(); }
+  const ep = USER_EPOCH;
+  return fetch(CFG.supabaseUrl + '/auth/v1/user', {
+    headers:{ apikey: CFG.supabaseKey, Authorization: 'Bearer ' + AUTH.access }
+  }).then(function(r){
+    if(r.status === 401 && !retried){
+      /* אולי רק פג — רענון אחד, ניסיון אחד */
+      return ensureToken(true).then(function(ok){ return ok ? loadIdentity(true) : null; })
+        .then(function(){ return null; });
+    }
+    return r.ok ? r.json() : null;
+  }).then(function(u){
+    if(!u || !u.id || !AUTH || ep !== USER_EPOCH) return;
+    AUTH.email = u.email || AUTH.email; AUTH.uid = u.id; authWrite(AUTH);
+    bindUser(authUid());
+    render();
+  }).catch(function(){});   /* אופליין — משאירים את המשתמש בפנים */
+}
+
+/* פענוח exp מתוך ה-JWT. טוקן הגישה חי שעה, ורענון היה ממומש רק
+   בקריאות לפונקציות — ולכן אחרי שעה כל שאילתה למסד חזרה 401
+   והאפליקציה נפלה למטמון בשקט. */
+function tokenExp(){
+  if(!AUTH || !AUTH.access) return 0;
+  const e = claims(AUTH.access).exp;
+  return isFinite(e) && e > 0 ? e * 1000 : 0;
 }
 function tokenStale(){
   const exp = tokenExp();
@@ -2871,29 +3557,53 @@ function tokenStale(){
    ניהול המפגש. נקודת כניסה אחת לרענון, כדי שקריאות מקבילות לא
    ישרפו טוקן רענון אחת לשנייה — Supabase מסובב אותם, וטוקן שכבר
    נצרך נדחה. כשל רשת אינו מנתק; רק דחייה מפורשת של השרת מנתקת.
+   epoch עולה בכל ניתוק: רענון שחוזר אחריו לא מחייה את המפגש.
    =========================================================== */
-const SESSION = { refreshing: null, timer: null, lastError: null };
+const SESSION = { refreshing: null, timer: null, lastError: null, epoch: 0, backoff: 0 };
 
 function hardSignOut(reason){
   AUTH = null;
   authWrite(null);
-  try{ localStorage.removeItem(VERIFY_KEY); }catch(e){}
+  SESSION.epoch++;
   if(SESSION.timer){ clearTimeout(SESSION.timer); SESSION.timer = null; }
   SESSION.refreshing = null;
+  /* הזיכרון מתרוקן; מה שבדיסק נשאר תחת ה-uid ולא מוצג לאחר */
+  bindUser(null);
+  quiz = null;
+  pendingShare = null;
+  Array.prototype.forEach.call(document.querySelectorAll('.sheet-bg'), function(b){ b.remove(); });
   view = {name:'home', lockErr: reason || 'ההתחברות פגה. התחבר שוב.'};
   render();
 }
 
-/* הקריאה היחידה שמחליפה טוקן. מחזירה 'ok' · 'transient' · 'terminal' */
+/* לשונית אחרת כבר רעננה, והטוקן שבזיכרון כאן נצרך. מאמצים את שלה —
+   אחרת ניסיון לרענן עם הטוקן הישן נדחה, ומנתק את שתי הלשוניות. */
+function adoptFromDisk(){
+  const disk = authRead();
+  if(!disk || !AUTH || disk.refresh === AUTH.refresh) return false;
+  const a = claims(disk.access), mine = authUid();
+  if(!a.sub || !mine || a.sub !== mine) return false;
+  if(!a.exp || Date.now() > a.exp * 1000 - 60000) return false;
+  AUTH = Object.assign({}, AUTH, {access: disk.access, refresh: disk.refresh});
+  scheduleRefresh();
+  return true;
+}
+
+/* הקריאה היחידה שמחליפה טוקן. מחזירה 'ok' · 'transient' · 'terminal' · 'aborted' */
 function doRefresh(){
   if(!AUTH || !AUTH.refresh) return Promise.resolve('terminal');
+  if(adoptFromDisk()) return Promise.resolve('ok');
+  const ep = SESSION.epoch, rt = AUTH.refresh;
+  const gone = function(){ return ep !== SESSION.epoch || !AUTH || AUTH.refresh !== rt; };
   return fetch(CFG.supabaseUrl + '/auth/v1/token?grant_type=refresh_token', {
     method:'POST',
     headers:{ apikey: CFG.supabaseKey, 'Content-Type':'application/json' },
-    body: JSON.stringify({ refresh_token: AUTH.refresh })
+    body: JSON.stringify({ refresh_token: rt })
   }).then(function(r){
     if(r.ok) return r.json().then(function(j){
       if(!j || !j.access_token) return 'terminal';
+      /* התנתקות בזמן הבקשה — המפגש החדש מבוטל ולא חוזר לחיים */
+      if(gone()){ revoke(j.access_token); return 'aborted'; }
       /* משמרים את שאר הזהות — בנייה מחדש מחקה את uid ושברה הכול */
       AUTH = Object.assign({}, AUTH, {
         access:  j.access_token,
@@ -2903,8 +3613,10 @@ function doRefresh(){
       scheduleRefresh();
       return 'ok';
     });
+    if(gone()) return 'aborted';
     return r.text().then(function(t){
       SESSION.lastError = String(t).slice(0, 200);
+      if(adoptFromDisk()) return 'ok';
       logError('fetch', 'refresh_token → ' + r.status, {body:SESSION.lastError});
       /* 5xx או 429 — תקלה חולפת בשרת, לא סיבה לנתק משתמש */
       if(r.status >= 500 || r.status === 429) return 'transient';
@@ -2926,6 +3638,7 @@ function ensureToken(force){
     SESSION.refreshing = doRefresh().then(function(res){
       SESSION.refreshing = null;
       if(res === 'terminal'){ hardSignOut(); return false; }
+      if(res === 'transient') retryRefreshLater();
       return res === 'ok';
     });
   }
@@ -2936,18 +3649,55 @@ function ensureToken(force){
    שנכשלת. גם חזרה ללשונית מפעילה בדיקה. */
 function scheduleRefresh(){
   if(SESSION.timer){ clearTimeout(SESSION.timer); SESSION.timer = null; }
+  SESSION.backoff = 0;
   const exp = tokenExp();
   if(!exp) return;
   const wait = Math.max(15000, exp - Date.now() - 120000);   /* שתי דקות מרווח */
   if(wait > 2147483647) return;
-  SESSION.timer = setTimeout(function(){ ensureToken(false); }, wait);
+  SESSION.timer = setTimeout(function(){ SESSION.timer = null; ensureToken(false); }, wait);
 }
-addEventListener('visibilitychange', function(){
-  if(document.visibilityState !== 'visible' || !AUTH) return;
-  /* חזרה ללשונית מסנכרנת גם את המפגש וגם את התוכן, כך שמכשיר שני
-     או שינוי שנעשה במקום אחר מופיעים בלי פעולה ידנית. */
-  ensureToken(false).then(function(){ if(AUTH && canSync()) syncLibrary(); });
+/* רענון שנכשל בגלל רשת — עוד ניסיון, במרווח שגדל עד חמש דקות */
+function retryRefreshLater(){
+  if(!AUTH) return;
+  if(SESSION.timer) clearTimeout(SESSION.timer);
+  SESSION.backoff = Math.min(300000, (SESSION.backoff || 15000) * 2);
+  SESSION.timer = setTimeout(function(){ SESSION.timer = null; ensureToken(false); }, SESSION.backoff);
+}
+
+/* לשונית אחרת (האפליקציה המותקנת ולשונית בדפדפן, למשל) שינתה משהו */
+addEventListener('storage', function(e){
+  if(!e.key) return;
+  if(e.key === AUTH_KEY){
+    const disk = authRead();
+    if(!disk){ if(AUTH) hardSignOut('התנתקת בחלון אחר.'); return; }
+    const other = disk.uid || claims(disk.access).sub || '';
+    if(!AUTH || (other && authUid() && other !== authUid())){ location.reload(); return; }
+    if(disk.refresh !== AUTH.refresh){
+      AUTH = Object.assign({}, AUTH, {access: disk.access, refresh: disk.refresh});
+      scheduleRefresh();
+    }
+    return;
+  }
+  if(UID === null) return;
+  if(e.key === ukey(CARDS_KEY) || e.key === ukey(DIRTY_KEY) || e.key === ukey(LOG_KEY)) mergeFromDisk();
 });
+/* איחוד עם מה שלשונית אחרת כתבה: כרטיס — המאוחר מנצח; תור — איחוד
+   לפי מזהה. השרת מתעלם מכפילויות, כך שעודף שליחה אינו נזק. */
+function mergeFromDisk(){
+  const c = uread(CARDS_KEY, {}), d = uread(DIRTY_KEY, {}), l = uread(LOG_KEY, []);
+  let changed = false;
+  if(isObj(c)) Object.keys(c).forEach(function(k){
+    const st = c[k];
+    if(validState(st) && (!CARDS[k] || st.last > CARDS[k].last)){ CARDS[k] = st; changed = true; }
+  });
+  if(isObj(d)) Object.keys(d).forEach(function(k){ if(!DIRTY[k] && CARDS[k]) DIRTY[k] = 1; });
+  if(Array.isArray(l)){
+    const have = {};
+    LOGQ.forEach(function(x){ have[x.id] = 1; });
+    l.forEach(function(x){ if(isObj(x) && x.id && x.card_key && !have[x.id]) LOGQ.push(x); });
+  }
+  if(changed) render();
+}
 
 /* קריאה לפונקציה עם טוקן המשתמש. מרענן פעם אחת על 401. */
 const CALL_TIMEOUT = 170000;
@@ -3310,7 +4060,9 @@ function memChip(key){
 }
 
 function renderBrowse(){
-  const d = deckById(view.deck);
+  /* תצוגה מקדימה של אדמין בונה חבילה מהשורה עצמה, בלי להכניס אותה לספרייה */
+  const d = view.preview || deckById(view.deck);
+  if(!d) return goneHome();
   const q = (view.q || '').trim().toLowerCase();
   const hide = !!view.hide;
 
@@ -3338,8 +4090,8 @@ function renderBrowse(){
         }).join('')+'</'+(b.ordered?'ol':'ul')+'>' : '')+
       (b.note ? '<div class="note">'+esc(b.note)+'</div>' : '')+
       '<div class="row">'+memChip(r.key)+
-        (b.tag ? '<span class="chip cat" style="color:'+(b.tagColor||'var(--ink-2)')+
-                 ';border-color:'+(b.tagColor||'var(--line-2)')+'">'+esc(b.tag)+'</span>' : '')+
+        (b.tag ? '<span class="chip cat" style="color:'+safeColor(b.tagColor, 'var(--ink-2)')+
+                 ';border-color:'+safeColor(b.tagColor, 'var(--line-2)')+'">'+esc(b.tag)+'</span>' : '')+
       '</div></div></div>';
   }).join('');
 
@@ -3360,6 +4112,7 @@ function renderBrowse(){
   '</div>';
 
   app.querySelector('#backBtn').addEventListener('click', function(){
+    if(view.preview){ openAdmin(view.fromTab); return; }
     view = {name:'deck', deck:d.id}; render();
   });
   app.querySelector('#bhide').addEventListener('click', function(){
@@ -3381,92 +4134,86 @@ function renderBrowse(){
 
 /* ===========================================================
    מאגר הנושאים — מה שלי, ומה שאחרים פרסמו. מינוי הוא חי:
-   הבעלים מעדכן, וכל מי שרשום רואה מיד את הגרסה החדשה.
+   הבעלים מעדכן, וכל מי שרשום רואה מיד את הגרסה החדשה. פרסום של
+   משתמש רגיל ממתין לאישור אדמין לפני שהוא מופיע לאחרים.
    =========================================================== */
-/* איפוס מלא: מטמון הנושאים, מטמון ה-service worker, ואז משיכה מחדש.
-   מדווח מה קרה במקום לרענן בעיוורון — רענון עיוור נראה בדיוק כמו
-   כפתור שלא עשה כלום. */
-function hardReset(){
-  const steps = [];
-  return Promise.resolve()
-    .then(function(){
-      try{ localStorage.removeItem(ROWS_KEY); steps.push('מטמון נושאים נמחק'); }
-      catch(e){ steps.push('מטמון נושאים: ' + e.message); }
-    })
-    .then(function(){
-      if(typeof caches === 'undefined' || !caches.keys) return null;
-      return caches.keys()
-        .then(function(keys){
-          return Promise.all(keys.map(function(k){ return caches.delete(k); }))
-            .then(function(){ if(keys.length) steps.push(keys.length + ' מטמוני גרסה נמחקו'); });
-        }).catch(function(){});
-    })
-    .then(function(){
-      if(!navigator.serviceWorker || !navigator.serviceWorker.getRegistration) return null;
-      return navigator.serviceWorker.getRegistration()
-        .then(function(r){ return r && r.update(); }).catch(function(){});
-    })
-    .then(function(){
-      LIB.status = 'unknown'; LIB.rows = []; LIB.reason = null;
-      return (AUTH && AUTH.uid) ? null : loadIdentity();
-    })
-    .then(loadLibrary)
-    .then(function(res){
-      steps.push(res && res.ok
-        ? 'התקבלו ' + res.data.length + ' נושאים מהשרת'
-        : 'המשיכה נכשלה' + (res && res.reason ? ' — ' + res.reason : ''));
-      return steps.join(' · ');
-    })
-    .catch(function(err){
-      steps.push('נכשל: ' + ((err && err.message) || 'שגיאה'));
-      return steps.join(' · ');
-    });
-}
-
 function openStore(highlight){
-  const report = view && view.resetReport;
-  view = {name:'store', loading:true, mine:[], others:[], subs:[],
-          highlight:highlight||null, resetReport:report||null};
+  view = {name:'store', loading:true, mine:[], others:[], subs:[], review:{},
+          highlight:highlight||null};
   render();
   /* הספרייה נמשכת דרך אותו מסלול כמו המסך הראשי, כדי ששני המסכים
-     לא יוכלו להציג מצבים שונים. קודם המאגר שאל בנפרד, ולכן נושא
-     שנוצר הופיע כאן ולא שם. */
-  Promise.all([syncLibrary(), fetchStore(), fetchSubs()]).then(function(r){
-    r[2] = r[2] || [];
-    const uid = AUTH && AUTH.uid;
+     לא יוכלו להציג מצבים שונים. המינויים מגיעים מאותה טעינה. */
+  Promise.all([syncLibrary(), fetchStore(), fetchReviewStatus()]).then(function(r){
+    if(view.name !== 'store') return;
+    const uid = UID;
     view.mine   = LIB.rows.filter(function(d){ return d.owner_id === uid; });
     const mineIds = view.mine.map(function(d){ return d.id; });
-    view.others = r[1].filter(function(d){ return mineIds.indexOf(d.id) < 0; });
-    view.subs   = r[2];
+    const pub = r[1] || {};
+    view.others = pub.ok ? pub.data.filter(function(d){ return mineIds.indexOf(d.id) < 0; }) : [];
+    view.storeErr = pub.ok ? null : (pub.reason || 'לא הצלחתי לטעון');
+    view.subs   = Array.isArray(LIB.subs) ? LIB.subs : [];
+    view.review = r[2] || {};
     view.libError = LIB.status !== 'ok' ? (LIB.reason || 'לא הצלחתי לרענן') : null;
     view.loading = false;
     /* נושא שהגיע מקישור מוצג ראשון, גם אם עוד לא נרשמתי אליו */
     if(view.highlight){
       const idx = view.others.map(function(x){ return x.id; }).indexOf(view.highlight);
       if(idx > 0) view.others.unshift(view.others.splice(idx,1)[0]);
+      if(idx < 0 && mineIds.indexOf(view.highlight) < 0 && pub.ok)
+        view.err = 'הנושא מהקישור לא נמצא. ייתכן שהוא עדיין ממתין לאישור, או שכבר אינו ציבורי.';
     }
     render();
   }).catch(function(){ view.loading = false; view.err = 'לא הצלחתי לטעון.'; render(); });
 }
 
+/* מצב הפרסום של נושא שלי, כפי שהשרת קבע אותו */
+function pubState(d){
+  const rv = (view.review || {})[d.id] || {};
+  const st = rv.review_status || (d.visibility === 'public' ? 'approved' : 'none');
+  if(d.visibility === 'public' && st === 'pending') return {cls:'wait', label:'ממתין לאישור', live:false};
+  if(d.visibility === 'public') return {cls:'pub', label:'ציבורית', live:true};
+  if(st === 'rejected') return {cls:'no', label:'נדחה', live:false, note:rv.review_note};
+  return {cls:'', label:'פרטית', live:false};
+}
+
+/* ההיסטוריה של חבילה כפולה עוברת לזו שנשארת לפני המחיקה — אחרת
+   תרגול שנעשה בעותק השני נראה כאילו נמחק */
+function moveDeckKeys(fromId, toId){
+  const from = fromId + ':', to = toId + ':';
+  let moved = 0;
+  Object.keys(CARDS).forEach(function(k){
+    if(k.indexOf(from) !== 0) return;
+    const nk = to + k.slice(from.length), st = CARDS[k];
+    if(validState(st) && (!CARDS[nk] || st.last > CARDS[nk].last)){ CARDS[nk] = st; DIRTY[nk] = 1; }
+    delete CARDS[k]; delete DIRTY[k];
+    moved++;
+  });
+  if(moved) saveCards();
+  return moved;
+}
+
 function renderStore(){
-  const subs = view.subs || [];
+  const subs = Array.isArray(view.subs) ? view.subs : [];
   const isSub = function(id){ return subs.indexOf(id) > -1; };
+  const admin = !!(AUTH && AUTH.admin);
 
   function card(d, mine){
     const count = d.item_count || 0;
+    const ps = mine ? pubState(d) : null;
     const pub = d.visibility === 'public';
     return '<div class="scard'+(view.highlight===d.id ? ' hl' : '')+'">'+
       '<div class="txt"><strong>'+esc(d.title)+
-        (mine ? '<span class="vis'+(pub?' pub':'')+'">'+(pub?'ציבורית':'פרטית')+'</span>' : '')+
+        (mine ? '<span class="vis '+ps.cls+'">'+ps.label+'</span>' : '')+
       '</strong>'+
-      '<span>'+count+' כרטיסים'+(d.subtitle ? ' · '+esc(d.subtitle) : '')+'</span></div>'+
+      '<span>'+count+' כרטיסים'+(d.subtitle ? ' · '+esc(d.subtitle) : '')+'</span>'+
+      (mine && ps.note ? '<span class="rnote">הערת המאשר: '+esc(ps.note)+'</span>' : '')+
+      '</div>'+
       (mine
-        ? (pub ? '<button class="act" data-link="'+d.id+'" aria-label="העתק קישור">קישור</button>' : '')+
-          '<button class="act'+(pub?' on':'')+'" data-pub="'+d.id+'" data-to="'+(pub?'private':'public')+'">'+
-            (pub?'הפוך לפרטי':'פרסם')+'</button>'+
-          '<button class="act danger" data-del="'+d.id+'" aria-label="מחק">✕</button>'
-        : '<button class="act'+(isSub(d.id)?' on danger':'')+'" data-sub="'+d.id+'">'+
+        ? (ps.live ? '<button class="act" data-link="'+esc(d.id)+'" aria-label="העתק קישור">קישור</button>' : '')+
+          '<button class="act'+(pub?' on':'')+'" data-pub="'+esc(d.id)+'" data-to="'+(pub?'private':'public')+'">'+
+            (pub ? 'הפוך לפרטי' : (admin ? 'פרסם' : 'שלח לאישור'))+'</button>'+
+          '<button class="act danger" data-del="'+esc(d.id)+'" aria-label="מחק">✕</button>'
+        : '<button class="act'+(isSub(d.id)?' on danger':'')+'" data-sub="'+esc(d.id)+'">'+
             (isSub(d.id)?'הסר':'הוסף')+'</button>')+
     '</div>';
   }
@@ -3477,7 +4224,7 @@ function renderStore(){
      במסלול הישן ונכתב לריפו במקום למסד */
   const have = {};
   mine.forEach(function(d){ have[d.kind + '|' + d.title] = true; });
-  const missing = starterRows(AUTH && AUTH.uid).filter(function(r){
+  const missing = starterRows(UID).filter(function(r){
     return !have[r.kind + '|' + r.title];
   });
   app.innerHTML =
@@ -3487,7 +4234,7 @@ function renderStore(){
   '</div>'+
   '<div class="store-wrap">'+
     (view.loading ? '<p class="note">טוען…</p>' : '')+
-    (view.err ? '<p class="note">'+esc(view.err)+'</p>' : '')+
+    (view.err ? '<div class="lib-warn">'+esc(view.err)+'</div>' : '')+
     (view.libError
       ? '<div class="lib-warn">הרשימה מהמטמון — '+esc(view.libError)+
           '<button id="storeRetry">נסה שוב</button></div>'
@@ -3496,19 +4243,24 @@ function renderStore(){
       ? '<div class="panel share"><div class="share-row">'+
           '<div><strong>נמצאו '+dups.length+' כפילויות</strong>'+
           '<span>אותו נושא נוצר יותר מפעם אחת. הניקוי משאיר את הראשון שנוצר, '+
-            'זה שאליו הועברה היסטוריית התזמון.</span></div>'+
+            'ומעביר אליו את היסטוריית התרגול של העותקים.</span></div>'+
           '<button class="act danger" id="dedupBtn">נקה</button>'+
         '</div></div>'
       : '')+
     (mine.length
       ? '<div class="store-sec"><h3>הנושאים שלי — פרסום ושיתוף</h3>'+
-        '<p class="sec-note">פרסום הופך נושא לגלוי לכל מי שמחובר, והם יוכלו להוסיף אותו לעצמם. '+
+        '<p class="sec-note">'+(admin
+          ? 'פרסום הופך נושא לגלוי לכל מי שמחובר, והם יוכלו להוסיף אותו לעצמם. '
+          : 'פרסום שולח את הנושא לאישור. אחרי האישור הוא גלוי לכל מי שמחובר, והם יוכלו להוסיף אותו לעצמם. ')+
           'העריכה נשארת אצלך, וכל שינוי מגיע אליהם מיד.</p>'+
        mine.map(function(d){ return card(d, true); }).join('')+'</div>' : '')+
     '<div class="store-sec"><h3>פורסמו על ידי אחרים</h3>'+
-      (others.length
-        ? others.map(function(d){ return card(d, false); }).join('')
-        : (view.loading ? '' : '<p class="note">אין כרגע חבילות ציבוריות.</p>'))+
+      (view.storeErr
+        ? '<div class="lib-warn">לא הצלחתי לטעון את המאגר ('+esc(view.storeErr)+').'+
+            '<button id="storeRetry2">נסה שוב</button></div>'
+        : others.length
+          ? others.map(function(d){ return card(d, false); }).join('')
+          : (view.loading ? '' : '<p class="note">אין כרגע חבילות ציבוריות.</p>'))+
     '</div>'+
     (!view.loading && missing.length
       ? '<div class="panel share"><div class="share-row">'+
@@ -3520,24 +4272,15 @@ function renderStore(){
       : '')+
     '<p class="note">פרסום הופך נושא לקריא לכל מי שמחובר. עריכה נשארת אצל הבעלים, '+
       'ומי שרשום רואה תמיד את הגרסה העדכנית.</p>'+
-    '<div class="diag">'+
-      '<div><b>מצב</b></div>'+
-      '<div>זהות: '+(AUTH && AUTH.uid ? '✓ ' + esc(String(AUTH.uid).slice(0,8)) : '✗ חסרה') +
-        ' · עריכה: '+((AUTH && AUTH.editor) ? '✓' : '✗') +
-        ' · טוקן: '+(tokenExp() ? (tokenStale() ? 'פג' : 'תקף עד ' +
-          new Date(tokenExp()).toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})) : '—')+'</div>'+
-      '<div>מהשרת: '+(view.mine||[]).length+' שלי · '+(view.others||[]).length+' של אחרים · '+
-        (view.subs||[]).length+' מינויים</div>'+
-      '<div>ספרייה: '+esc(LIB.status)+(LIB.reason ? ' ('+esc(LIB.reason)+')' : '')+
-        ' · '+LIB.rows.length+' במטמון · '+DECKS.length+' מוצגים</div>'+
-      (view.resetReport ? '<div class="diag-report">'+esc(view.resetReport)+'</div>' : '')+
-      '<div class="diag-acts">'+
-        '<button id="reloadSrv">משוך מהשרת</button>'+
-        '<button id="wipeCache">אפס מטמון מקומי</button>'+
-        ((AUTH && AUTH.admin) ? '<button id="errBtn">יומן תקלות</button>' : '')+
-      '</div>'+
-    '</div>'+
   '</div>';
+
+  const fail = function(b, label){
+    return function(e){
+      view.err = 'הפעולה נכשלה: ' + ((e && e.message) || 'שגיאה');
+      if(b){ b.disabled = false; if(label) b.textContent = label; }
+      render();
+    };
+  };
 
   app.querySelector('#backBtn').addEventListener('click', function(){ view={name:'home'}; render(); });
 
@@ -3547,7 +4290,7 @@ function renderStore(){
       b.disabled = true;
       mutate(function(){ return isSub(id) ? unsubscribe(id) : subscribe(id); })
         .then(function(){ openStore(); })
-        .catch(function(){ b.disabled = false; });
+        .catch(fail(b));
     });
   });
   const seedB = app.querySelector('#seedBtn');
@@ -3560,29 +4303,16 @@ function renderStore(){
         render();
         return;
       }
-      return syncLibrary().then(function(){ openStore(); });
+      openStore();
+      if(res.note){ view.err = res.note; }
     });
   });
 
-  const sr = app.querySelector('#storeRetry');
-  if(sr) sr.addEventListener('click', function(){
-    sr.disabled = true; sr.textContent = 'טוען…';
-    (AUTH && AUTH.uid ? Promise.resolve() : loadIdentity()).then(function(){ openStore(); });
-  });
-  const rl = app.querySelector('#reloadSrv');
-  if(rl) rl.addEventListener('click', function(){
-    rl.disabled = true; rl.textContent = 'מושך…';
-    (AUTH && AUTH.uid ? Promise.resolve() : loadIdentity())
-      .then(loadLibrary).then(function(){ openStore(); });
-  });
-  const eb = app.querySelector('#errBtn');
-  if(eb) eb.addEventListener('click', openErrors);
-  const wc = app.querySelector('#wipeCache');
-  if(wc) wc.addEventListener('click', function(){
-    wc.disabled = true; wc.textContent = 'מאפס…';
-    hardReset().then(function(report){
-      view.resetReport = report;
-      openStore();
+  ['#storeRetry', '#storeRetry2'].forEach(function(sel){
+    const sr = app.querySelector(sel);
+    if(sr) sr.addEventListener('click', function(){
+      sr.disabled = true; sr.textContent = 'טוען…';
+      (UID ? Promise.resolve() : loadIdentity()).then(function(){ openStore(); });
     });
   });
 
@@ -3606,7 +4336,7 @@ function renderStore(){
       b.disabled = true;
       mutate(function(){ return deleteDeck(b.dataset.del); })
         .then(function(){ openStore(); })
-        .catch(function(){ b.disabled = false; });
+        .catch(fail(b));
     });
   });
 
@@ -3614,18 +4344,25 @@ function renderStore(){
   if(dd) dd.addEventListener('click', function(){
     if(!confirm('למחוק '+dups.length+' כפילויות? הראשון שנוצר בכל נושא יישמר.')) return;
     dd.disabled = true; dd.textContent = 'מנקה…';
+    const keep = {};
+    mine.slice().sort(function(a,b){
+      return (a.created_at||'').localeCompare(b.created_at||'') || a.id.localeCompare(b.id);
+    }).forEach(function(d){ const k = d.kind + '|' + d.title; if(!keep[k]) keep[k] = d.id; });
     mutate(function(){
-      return Promise.all(dups.map(function(d){ return deleteDeck(d.id); }));
-    }).then(function(){ openStore(); })
-      .catch(function(){ dd.disabled = false; dd.textContent = 'נקה'; });
+      return Promise.all(dups.map(function(d){
+        moveDeckKeys(d.id, keep[d.kind + '|' + d.title]);
+        return deleteDeck(d.id);
+      }));
+    }).then(function(){ syncCards(false); openStore(); })
+      .catch(fail(dd, 'נקה'));
   });
 
   Array.prototype.forEach.call(app.querySelectorAll('[data-pub]'), function(b){
     b.addEventListener('click', function(){
       b.disabled = true;
       mutate(function(){ return setVisibility(b.dataset.pub, b.dataset.to); })
-        .then(function(){ openStore(); })
-        .catch(function(){ b.disabled = false; });
+        .then(function(){ openStore(); if(AUTH && AUTH.admin) loadAdminBadge(); })
+        .catch(fail(b));
     });
   });
 }
@@ -3636,13 +4373,24 @@ function renderStore(){
    =========================================================== */
 const DAY_NAMES = ['א','ב','ג','ד','ה','ו','ש'];
 
+/* רק כרטיסים שבספרייה הנוכחית. מפתחות יתומים (חבילה שנמחקה, מינוי
+   שבוטל, מפתח ישן) היו נספרים כעומס שלעולם לא יגיע לחזרה. */
+function libraryKeys(){
+  const keys = [];
+  DECKS.forEach(function(d){
+    d.items.forEach(function(it){ keys.push(d.keyFn(it)); });
+    if(d.map && d.map.isoPairs) d.map.isoPairs.forEach(function(p){ keys.push(d.keyFn(p)); });
+  });
+  return keys;
+}
 function forecast(days){
   const out = [];
   const start = new Date(); start.setHours(0,0,0,0);
+  const keys = libraryKeys().filter(function(k){ return CARDS[k]; });
   for(let i=0;i<days;i++){
     const from = start.getTime() + i*DAY, to = from + DAY;
     let n = 0;
-    Object.keys(CARDS).forEach(function(k){
+    keys.forEach(function(k){
       const due = CARDS[k].due;
       /* כל מה שבאיחור נופל להיום, כי זה מה שבאמת מחכה לך */
       if(i===0 ? due < to : (due >= from && due < to)) n++;
@@ -3691,19 +4439,35 @@ function barChart(rows, opts){
     'aria-label="'+esc(opts.alt)+'">'+grid+bars+labels+'</svg>';
 }
 
+/* יומן החזרות מהשרת, בעמודים, ועוד מה שעוד לא נשלח מהמכשיר — אחרת
+   תרגול אופליין לא נספר עד שהרשת חוזרת */
 function loadStats(){
   view.stats = {loading:true};
   render();
   const since = new Date(Date.now() - 30*DAY).toISOString();
-  const q = canSync()
-    ? rest('review_log?select=rating,reviewed_at&reviewed_at=gte.' + since +
-           '&order=reviewed_at.desc&limit=3000')
-        .then(function(r){ return r.ok ? r.json() : []; }).catch(function(){ return []; })
-    : Promise.resolve([]);
-  q.then(function(logs){
+  const all = [];
+  const page = function(offset, n){
+    return readPage('review_log?select=rating,reviewed_at,client_id&user_id=eq.' + UID +
+                    '&reviewed_at=gte.' + since + '&order=reviewed_at.desc&limit=1000&offset=' + offset)
+      .then(function(rows){
+        rows.forEach(function(r){ all.push(r); });
+        if(rows.length && n < 10) return page(offset + rows.length, n + 1);
+      });
+  };
+  const q = canSyncUser()
+    ? page(0, 0).then(function(){ return true; }, function(){ return false; })
+    : Promise.resolve(false);
+  q.then(function(fromServer){
+    const sent = {};
+    all.forEach(function(l){ if(l.client_id) sent[l.client_id] = 1; });
+    const sinceT = Date.parse(since);
+    const logs = all.concat(LOGQ.filter(function(e){
+      return !sent[e.id] && Date.parse(e.reviewed_at) >= sinceT;
+    }));
     const week = Date.now() - 7*DAY;
     view.stats = {
       loading:false,
+      fromServer: fromServer,
       total: logs.length,
       correct: logs.filter(function(l){ return l.rating > 1; }).length,
       week: logs.filter(function(l){ return Date.parse(l.reviewed_at) >= week; }).length,
@@ -3747,14 +4511,14 @@ function renderStats(){
         'letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2);margin:0 0 8px">לפי נושא</h3>'+
       '<div class="dtable">'+DECKS.map(function(d){
         const dm = masteredCount(d.items, d.keyFn), dd = dueCount(d.items, d.keyFn);
-        return '<div class="drow"><span class="dot" style="background:'+d.color+'"></span>'+
+        return '<div class="drow"><span class="dot" style="background:'+safeColor(d.color)+'"></span>'+
           '<span class="nm">'+esc(d.title)+'</span>'+
           '<span class="num"><b>'+dm+'</b>/'+d.items.length+' נשלטים · <b>'+dd+'</b> לחזרה</span></div>';
       }).join('')+'</div>'+
     '</div>'+
 
     '<p class="note">'+seen+' מתוך '+items.length+' כרטיסים כבר נראו. '+
-      (canSync() ? '' : 'שיעור ההצלחה דורש חיבור לרשת.')+'</p>'+
+      (st.loading || st.fromServer ? '' : 'בלי חיבור לשרת — הנתונים כוללים רק את מה שבמכשיר.')+'</p>'+
   '</div>';
 
   app.querySelector('#backBtn').addEventListener('click', function(){ view={name:'home'}; render(); });
@@ -3781,36 +4545,320 @@ function renderStats(){
 }
 
 /* ===========================================================
-   יומן התקלות — מסך אדמין. RLS כבר מגביל את הקריאה, אז אין כאן
-   בדיקת הרשאה שנייה; הכפתור פשוט לא מוצג למי שאינו אדמין.
+   ניהול — אדמין בלבד. ההרשאה נאכפת בשרת (is_admin ב-RLS ובפונקציות
+   admin_*); הכפתור כאן רק מסתיר את מה שממילא ייחסם.
+     לאישור    — נושאים שמשתמשים פרסמו ומחכים לאישור, או שהשתנו מאז
+     ציבוריות  — כל מה שמוצג במאגר, והסתרה או מחיקה שלו
+     משתמשים   — מי פעיל, והאם הסנכרון שלו באמת מגיע לשרת
+     מערכת     — מצב המכשיר הזה, וסנכרון יזום
    =========================================================== */
-function openErrors(){
-  view = {name:'errors', loading:true, rows:[], filter:''};
+const ADMIN = { pending: 0 };
+
+function rpc(name, args, quiet){
+  return rest('rpc/' + name, {method:'POST', quiet:!!quiet, body: JSON.stringify(args || {})});
+}
+/* תשובה של פונקציה שעוד לא קיימת (מיגרציה 0006 לא הורצה) — הודעה ברורה */
+function rpcJson(name, args, quiet){
+  return rpc(name, args, quiet).then(function(r){
+    if(r.ok) return r.json();
+    return r.text().then(function(t){
+      let m = t, code = '';
+      try{ const j = JSON.parse(t); m = j.message || t; code = j.code || ''; }catch(e){}
+      if(r.status === 404 || code === 'PGRST202')
+        throw new Error('צריך להריץ את מיגרציה 0006 ב-SQL Editor של Supabase');
+      throw new Error(String(m || ('HTTP ' + r.status)).slice(0, 200));
+    });
+  });
+}
+
+/* מספר הממתינים לכפתור בבית — שקט, בלי יומן, כי לפני המיגרציה זה צפוי להיכשל */
+function loadAdminBadge(){
+  if(!AUTH || !AUTH.admin || !canSyncUser()) return Promise.resolve();
+  return rpcJson('admin_moderation', {}, true).then(function(rows){
+    const n = (rows || []).filter(function(d){ return d.review_status === 'pending'; }).length;
+    if(n !== ADMIN.pending){ ADMIN.pending = n; render(); }
+  }).catch(function(){});
+}
+
+function openAdmin(tab){
+  view = {name:'admin', tab: tab || 'queue', loading:true, decks:[], users:null, err:null, note:null};
   render();
-  rest('error_log?select=id,at,kind,message,context,user_id,app&order=at.desc&limit=100')
-    .then(function(r){ return r.ok ? r.json() : []; })
-    .then(function(rows){ view.rows = rows || []; view.loading = false; render(); })
-    .catch(function(){ view.loading = false; view.err = 'לא הצלחתי לטעון.'; render(); });
+  loadAdmin();
+}
+function loadAdmin(){
+  const v = view;
+  v.loading = true; v.err = null;
+  const want = v.tab === 'users'
+    ? rpcJson('admin_users').then(function(rows){ v.users = rows || []; })
+    : v.tab === 'system'
+      ? Promise.resolve()
+      : rpcJson('admin_moderation').then(function(rows){
+          v.decks = rows || [];
+          ADMIN.pending = v.decks.filter(function(d){ return d.review_status === 'pending'; }).length;
+        });
+  return want.then(function(){ v.loading = false; v.loaded = true; if(view === v) render(); },
+                   function(e){ v.loading = false; v.loaded = true; v.err = e.message; if(view === v) render(); });
+}
+
+function fmtWhen(t){
+  if(!t) return '—';
+  const d = new Date(t);
+  if(isNaN(d)) return '—';
+  return d.toLocaleDateString('he-IL') + ' ' + d.toLocaleTimeString('he-IL', {hour:'2-digit', minute:'2-digit'});
+}
+
+function renderAdmin(){
+  const v = view;
+  /* חזרה למסך הזה בכפתור "אחורה" — הנתונים לא נטענו עדיין */
+  if(!v.loaded && !v.loading){ loadAdmin(); }
+  const tabs = [
+    ['queue',  'לאישור', ADMIN.pending],
+    ['public', 'ציבוריות', 0],
+    ['users',  'משתמשים', 0],
+    ['errors', 'יומן תקלות', 0],
+    ['system', 'מערכת', 0]
+  ];
+  let body = '';
+  if(v.tab === 'queue' || v.tab === 'public'){
+    const rows = (v.decks || []).filter(function(d){
+      return v.tab === 'queue'
+        ? d.review_status === 'pending'
+        : d.review_status !== 'pending';
+    });
+    body = rows.length ? rows.map(function(d){ return adminDeckRow(d, v.tab); }).join('')
+      : (v.loading ? '' : '<p class="note">'+(v.tab === 'queue' ? 'אין נושאים שממתינים לאישור.' : 'אין נושאים ציבוריים.')+'</p>');
+  } else if(v.tab === 'users'){
+    body = (v.users || []).map(adminUserRow).join('') ||
+      (v.loading ? '' : '<p class="note">אין משתמשים.</p>');
+  } else if(v.tab === 'system'){
+    body = adminSystem();
+  }
+
+  app.innerHTML =
+  '<div class="bar">'+
+    '<button class="icon-btn" id="backBtn" aria-label="חזרה">'+icon('arrow')+'</button>'+
+    '<div class="title">ניהול</div>'+
+  '</div>'+
+  '<div class="admin-wrap">'+
+    '<div class="tabs">'+tabs.map(function(t){
+      return '<button data-tab="'+t[0]+'"'+(v.tab === t[0] ? ' class="on"' : '')+'>'+t[1]+
+        (t[2] ? '<b>'+t[2]+'</b>' : '')+'</button>';
+    }).join('')+'</div>'+
+    (v.loading ? '<p class="note">טוען…</p>' : '')+
+    (v.err ? '<div class="lib-warn">'+esc(v.err)+'<button id="admRetry">נסה שוב</button></div>' : '')+
+    (v.note ? '<div class="diag-report">'+esc(v.note)+'</div>' : '')+
+    body+
+  '</div>';
+
+  app.querySelector('#backBtn').addEventListener('click', function(){ view = {name:'home'}; render(); });
+  Array.prototype.forEach.call(app.querySelectorAll('[data-tab]'), function(b){
+    b.addEventListener('click', function(){
+      if(b.dataset.tab === 'errors'){ openErrors(); return; }
+      if(b.dataset.tab === v.tab) return;
+      openAdmin(b.dataset.tab);
+    });
+  });
+  const rt = app.querySelector('#admRetry');
+  if(rt) rt.addEventListener('click', function(){ loadAdmin(); render(); });
+  wireAdminDecks(v);
+  if(v.tab === 'system') wireAdminSystem(v);
+}
+
+function adminDeckRow(d, tab){
+  const pending = d.review_status === 'pending';
+  const changed = pending && d.reviewed_at;       /* אושר בעבר ושונה מאז */
+  const st = d.visibility !== 'public'
+    ? (d.review_status === 'rejected' ? 'נדחה' : 'פרטי')
+    : pending ? (changed ? 'שונה אחרי אישור' : 'ממתין') : 'מאושר';
+  return '<div class="arow">'+
+    '<div class="ahead"><strong>'+esc(d.title || 'ללא כותרת')+'</strong>'+
+      '<span class="vis '+(pending ? 'wait' : d.visibility === 'public' ? 'pub' : 'no')+'">'+st+'</span></div>'+
+    '<div class="meta">'+
+      '<b>'+esc(d.owner_email || String(d.owner_id || '').slice(0,8))+'</b> · '+
+      (d.item_count || 0)+' פריטים · '+(d.subscribers || 0)+' מנויים · עודכן '+esc(fmtWhen(d.updated_at))+
+      (d.subtitle ? '<br>'+esc(d.subtitle) : '')+
+      (d.review_note ? '<br><span class="warn">הערה: '+esc(d.review_note)+'</span>' : '')+
+    '</div>'+
+    '<div class="acts">'+
+      '<button data-preview="'+esc(d.id)+'">תצוגה</button>'+
+      (pending ? '<button class="ok" data-approve="'+esc(d.id)+'">אשר</button>' : '')+
+      (d.visibility === 'public'
+        ? '<button data-reject="'+esc(d.id)+'">'+(pending ? 'דחה' : 'הסתר')+'</button>' : '')+
+      '<button class="danger" data-adel="'+esc(d.id)+'">מחק</button>'+
+    '</div>'+
+  '</div>';
+}
+
+function adminUserRow(u){
+  /* יש לו נושאים ואין לו אף כרטיס בשרת — או שלא תרגל, או שהסנכרון שלו לא מגיע */
+  const broken = (u.cards || 0) === 0 && (u.decks || 0) > 0;
+  return '<div class="arow">'+
+    '<div class="ahead"><strong>'+esc(u.email || String(u.user_id).slice(0,8))+'</strong>'+
+      (u.is_admin ? '<span class="vis pub">אדמין</span>' : '')+'</div>'+
+    '<div class="meta">'+
+      'נכנס לאחרונה '+esc(fmtWhen(u.last_sign_in_at))+' · נרשם '+esc(fmtWhen(u.created_at))+'<br>'+
+      '<b>'+(u.decks || 0)+'</b> נושאים · <b>'+(u.cards || 0)+'</b> כרטיסים בשרת'+
+      (u.last_card_at ? ' (אחרון '+esc(fmtWhen(u.last_card_at))+')' : '')+
+      ' · <b>'+(u.reviews_7d || 0)+'</b> חזרות בשבוע · <b>'+(u.errors_7d || 0)+'</b> תקלות בשבוע'+
+      (broken ? '<br><span class="warn">אין לו כרטיסים בשרת. אם הוא מתרגל — הסנכרון שלו לא מגיע.</span>' : '')+
+    '</div>'+
+  '</div>';
+}
+
+function wireAdminDecks(v){
+  const byId = function(id){ return (v.decks || []).filter(function(d){ return d.id === id; })[0] || {}; };
+  const act = function(b, work, doneNote){
+    b.disabled = true;
+    return work().then(function(){
+      v.note = doneNote;
+      loadAdmin();
+      syncLibrary();
+    }, function(e){
+      b.disabled = false;
+      v.err = 'הפעולה נכשלה: ' + ((e && e.message) || 'שגיאה');
+      render();
+    });
+  };
+  Array.prototype.forEach.call(app.querySelectorAll('[data-approve]'), function(b){
+    b.addEventListener('click', function(){
+      const d = byId(b.dataset.approve);
+      act(b, function(){ return rpcJson('admin_review_deck', {p_deck:d.id, p_verdict:'approved', p_note:null}); },
+          '"' + (d.title || '') + '" אושר ומופיע במאגר.');
+    });
+  });
+  Array.prototype.forEach.call(app.querySelectorAll('[data-reject]'), function(b){
+    b.addEventListener('click', function(){
+      const d = byId(b.dataset.reject);
+      const note = prompt('למה? ההערה תוצג לבעלים (אפשר להשאיר ריק).', '');
+      if(note === null) return;
+      act(b, function(){ return rpcJson('admin_review_deck', {p_deck:d.id, p_verdict:'rejected', p_note:note}); },
+          '"' + (d.title || '') + '" הוסתר מהמאגר. הבעלים רואה אותו כ"נדחה".');
+    });
+  });
+  Array.prototype.forEach.call(app.querySelectorAll('[data-adel]'), function(b){
+    b.addEventListener('click', function(){
+      const d = byId(b.dataset.adel);
+      if(!confirm('למחוק לצמיתות את "' + (d.title || '') + '" של ' + (d.owner_email || 'המשתמש') +
+                  '? גם המנויים יאבדו אותו. הפעולה אינה הפיכה.')) return;
+      act(b, function(){ return deleteDeck(d.id); }, '"' + (d.title || '') + '" נמחק.');
+    });
+  });
+  Array.prototype.forEach.call(app.querySelectorAll('[data-preview]'), function(b){
+    b.addEventListener('click', function(){
+      b.disabled = true;
+      readJson('decks?select=' + DECK_COLS + '&id=eq.' + b.dataset.preview).then(function(res){
+        b.disabled = false;
+        let deck = null;
+        try{ deck = res.ok && res.data[0] ? makeDeck(res.data[0], 0) : null; }catch(e){ deck = null; }
+        if(!deck || !deck.items || !deck.items.length){
+          v.err = res.ok ? 'אין בנושא פריטים תקינים להצגה.' : 'לא הצלחתי לטעון (' + res.reason + ').';
+          render();
+          return;
+        }
+        view = {name:'browse', preview:deck, deck:deck.id, fromTab:v.tab};
+        render();
+      });
+    });
+  });
+}
+
+function adminSystem(){
+  const dirty = Object.keys(DIRTY).length;
+  const exp = tokenExp();
+  return '<div class="diag">'+
+    '<div><b>המכשיר הזה</b></div>'+
+    '<div>זהות: '+(UID ? '✓ ' + esc(String(UID).slice(0,8)) + ' · ' + esc((AUTH && AUTH.email) || '') : '✗ חסרה')+
+      ' · עריכה: '+((AUTH && AUTH.editor) ? '✓' : '✗')+' · אדמין: ✓</div>'+
+    '<div>טוקן: '+(exp ? (tokenStale() ? 'פג' : 'תקף עד ' +
+      new Date(exp).toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})) : '—')+
+      (SESSION.lastError ? ' · תקלת רענון אחרונה: ' + esc(SESSION.lastError) : '')+'</div>'+
+    '<div>ספרייה: '+esc(LIB.status)+(LIB.reason ? ' ('+esc(LIB.reason)+')' : '')+
+      ' · '+LIB.rows.length+' במטמון · '+DECKS.length+' מוצגים'+
+      (LIB.at ? ' · עודכנה '+esc(fmtWhen(LIB.at)) : '')+'</div>'+
+    '<div>כרטיסים: '+Object.keys(CARDS).length+' במכשיר · '+dirty+' ממתינים לשליחה · '+
+      LOGQ.length+' חזרות ביומן הממתין</div>'+
+    '<div>תקלות ממתינות: '+ERRQ.length+' · סנכרון מלא אחרון: '+esc(fmtWhen(lastFullSync))+'</div>'+
+    (STORAGE.failed ? '<div>אחסון: <b>נכשלה כתיבה</b> ('+esc(STORAGE.failed)+')</div>' : '')+
+    '<div>גרסה: '+esc(ERR_APP)+'</div>'+
+    '<div class="diag-acts">'+
+      '<button id="syncNow">סנכרן עכשיו</button>'+
+      '<button id="updNow">בדוק עדכון גרסה</button>'+
+    '</div>'+
+  '</div>';
+}
+
+function wireAdminSystem(v){
+  const sn = app.querySelector('#syncNow');
+  if(sn) sn.addEventListener('click', function(){
+    sn.disabled = true; sn.textContent = 'מסנכרן…';
+    const before = Object.keys(DIRTY).length + LOGQ.length;
+    syncAll().then(function(ok){
+      const left = Object.keys(DIRTY).length + LOGQ.length;
+      v.note = (ok ? 'הסנכרון הושלם' : 'הסנכרון לא הושלם' + (LIB.reason ? ' — ' + LIB.reason : '')) +
+               ' · נשלחו ' + Math.max(0, before - left) + ' · נותרו ' + left;
+      if(view === v) render();
+    });
+  });
+  const up = app.querySelector('#updNow');
+  if(up) up.addEventListener('click', function(){
+    lastUpdateCheck = 0; checkForUpdate();
+    v.note = 'נבדק. אם יש גרסה חדשה היא תיטען ברגע שתחזור למסך הבית.';
+    render();
+  });
+}
+
+/* ===========================================================
+   יומן התקלות — מסך אדמין. נטען דרך admin_error_log, שמוסיף את
+   המייל של המשתמש; לפני המיגרציה — ישירות מהטבלה.
+   =========================================================== */
+function errKindCls(k){ return ERR_KINDS.indexOf(k) > -1 ? k : 'client'; }
+
+function openErrors(info){
+  view = {name:'errors', loading:true, rows:[], filter:'', more:false, info:info || null};
+  render();
+  loadErrors(null);
+}
+function loadErrors(before){
+  const v = view;
+  const LIMIT = 100;
+  rpcJson('admin_error_log', {p_before: before, p_limit: LIMIT, p_q: null}, true)
+    .catch(function(){
+      /* לפני מיגרציה 0006 — הדרך הישנה, בלי מייל */
+      return readJson('error_log?select=id,at,kind,message,context,user_id,app,user_agent' +
+                      (before ? '&id=lt.' + before : '') + '&order=id.desc&limit=' + LIMIT)
+        .then(function(res){ if(!res.ok) throw new Error(res.reason); return res.data; });
+    })
+    .then(function(rows){
+      if(view !== v) return;
+      v.rows = (before ? v.rows : []).concat(rows || []);
+      v.more = (rows || []).length === LIMIT;
+      v.loading = false; v.err = null;
+      render();
+    }, function(e){
+      if(view !== v) return;
+      v.loading = false; v.err = 'לא הצלחתי לטעון: ' + ((e && e.message) || 'שגיאה');
+      render();
+    });
 }
 
 function renderErrors(){
   const f = (view.filter || '').toLowerCase();
   const rows = (view.rows || []).filter(function(r){
     if(!f) return true;
-    return (r.kind + ' ' + r.message + ' ' + JSON.stringify(r.context || {}))
+    return (r.kind + ' ' + r.message + ' ' + (r.email || '') + ' ' + JSON.stringify(r.context || {}))
       .toLowerCase().indexOf(f) > -1;
   });
 
   const list = rows.map(function(r){
-    const t = new Date(r.at);
-    const when = t.toLocaleDateString('he-IL') + ' ' +
-                 t.toLocaleTimeString('he-IL', {hour:'2-digit', minute:'2-digit'});
     const ctx = r.context ? JSON.stringify(r.context) : '';
+    const who = [r.email || (r.user_id ? String(r.user_id).slice(0,8) : ''), r.app,
+                 r.user_agent ? String(r.user_agent).slice(0, 80) : ''].filter(Boolean).join(' · ');
     return '<div class="erow">'+
-      '<div class="ehead"><span class="ekind k-'+esc(r.kind)+'">'+esc(r.kind)+'</span>'+
-        '<span class="ewhen" dir="ltr">'+esc(when)+'</span></div>'+
+      '<div class="ehead"><span class="ekind k-'+errKindCls(r.kind)+'">'+esc(r.kind)+'</span>'+
+        '<span class="ewhen" dir="ltr">'+esc(fmtWhen(r.at))+'</span></div>'+
       '<div class="emsg" dir="ltr">'+esc(r.message)+'</div>'+
       (ctx ? '<div class="ectx" dir="ltr">'+esc(ctx.slice(0,300))+'</div>' : '')+
+      (who ? '<div class="ewho" dir="ltr">'+esc(who)+'</div>' : '')+
     '</div>';
   }).join('');
 
@@ -3823,27 +4871,48 @@ function renderErrors(){
   '<div class="browse-wrap">'+
     '<div class="browse-bar">'+
       '<input id="eq" type="search" placeholder="סינון" value="'+esc(view.filter||'')+'">'+
-      '<button id="eclear">מחק הכול</button>'+
+      '<button id="eclear">'+(f ? 'מחק את המוצגים' : 'מחק את הנטענים')+'</button>'+
+      '<button id="eprune">מחק ישנים מ-30 יום</button>'+
     '</div>'+
     (view.loading ? '<p class="note">טוען…</p>' : '')+
     (view.err ? '<p class="note">'+esc(view.err)+'</p>' : '')+
-    (!view.loading && !rows.length ? '<p class="note">אין תקלות. זה או שקט או שהלכידה לא עובדת.</p>' : '')+
+    (view.info ? '<div class="diag-report">'+esc(view.info)+'</div>' : '')+
+    (!view.loading && !view.err && !rows.length ? '<p class="note">אין תקלות. זה או שקט או שהלכידה לא עובדת.</p>' : '')+
     '<div class="elist">'+list+'</div>'+
+    (view.more && !view.loading ? '<button class="lab-entry" id="emore">טען עוד</button>' : '')+
   '</div>';
 
-  app.querySelector('#backBtn').addEventListener('click', function(){ view={name:'home'}; render(); });
+  app.querySelector('#backBtn').addEventListener('click', function(){
+    if(AUTH && AUTH.admin) openAdmin('queue'); else { view={name:'home'}; render(); }
+  });
   const inp = app.querySelector('#eq');
   inp.addEventListener('input', function(){
     view.filter = inp.value;
     const at = inp.selectionStart;
     render();
     const again = app.querySelector('#eq');
-    again.focus(); again.setSelectionRange(at, at);
+    if(again){ again.focus(); again.setSelectionRange(at, at); }
   });
+  const more = app.querySelector('#emore');
+  if(more) more.addEventListener('click', function(){
+    const last = view.rows[view.rows.length - 1];
+    view.loading = true; render();
+    loadErrors(last ? last.id : null);
+  });
+  /* מוחקים רק את מה שמוצג — לא שורות שלא נטענו או שהסינון הסתיר */
   app.querySelector('#eclear').addEventListener('click', function(){
-    if(!confirm('למחוק את כל היומן?')) return;
-    rest('error_log?id=gt.0', {method:'DELETE', headers:restHeaders()})
-      .then(function(){ openErrors(); });
+    const ids = rows.map(function(r){ return r.id; }).filter(function(x){ return isFinite(x); });
+    if(!ids.length) return;
+    if(!confirm('למחוק ' + ids.length + ' רשומות?')) return;
+    rest('error_log?id=in.(' + ids.join(',') + ')', {method:'DELETE', headers:{Prefer:'return=representation'}})
+      .then(function(r){ return mustOk(r, true); })
+      .then(function(){ openErrors(); }, function(e){ view.err = 'המחיקה נכשלה: ' + e.message; render(); });
+  });
+  app.querySelector('#eprune').addEventListener('click', function(){
+    if(!confirm('למחוק כל תקלה שישנה מ-30 יום?')) return;
+    rpcJson('admin_prune_errors', {p_days: 30})
+      .then(function(n){ openErrors('נמחקו ' + (n || 0) + ' רשומות ישנות.'); },
+            function(e){ view.err = 'המחיקה נכשלה: ' + e.message; render(); });
   });
 }
 
@@ -3862,7 +4931,8 @@ function parentOf(q, v){
   if(q) return deckOr(q.deck.id);
   if(v.name === 'home') return null;
   if(v.name === 'map') return deckOr(v.back);
-  if(v.name === 'browse') return deckOr(v.deck);
+  if(v.name === 'browse') return v.preview ? {name:'admin', tab:v.fromTab || 'queue'} : deckOr(v.deck);
+  if(v.name === 'errors') return AUTH && AUTH.admin ? {name:'admin', tab:'errors'} : {name:'home'};
   return {name:'home'};
 }
 function depthOf(){
@@ -3924,26 +4994,43 @@ function renderNow(){ renderPending = false; paint(); }
 /* גלילה לראש רק במעבר מסך. ציור חוזר של אותו מסך — תשובה, סנכרון
    ברקע, שיבוץ בתרגיל — משאיר את המשתמש איפה שהיה. */
 let paintedAt = null;
+/* מסך שקרס לא משאיר את המשתמש על תצוגה ישנה ללא מוצא: חוזרים הביתה
+   ונרשמים ביומן. lastPaintError נשאר לבדיקת העשן. */
+let lastPaintError = null;
 function paint(){
   syncHistory();
   if(authEnabled && !AUTH){ renderLock(); window.scrollTo(0,0); paintedAt = 'lock'; return; }
-  if(quiz && quiz.done) renderResults();
-  else if(quiz) renderQuiz();
-  else if(view.name==='deck') renderDeck();
-  else if(view.name==='map') renderMap();
-  else if(view.name==='lab') renderLab();
-  else if(view.name==='browse') renderBrowse();
-  else if(view.name==='store') renderStore();
-  else if(view.name==='stats') renderStats();
-  else if(view.name==='errors') renderErrors();
-  else renderHome();
+  try{
+    if(quiz && quiz.done) renderResults();
+    else if(quiz) renderQuiz();
+    else if(view.name==='deck') renderDeck();
+    else if(view.name==='map') renderMap();
+    else if(view.name==='lab') renderLab();
+    else if(view.name==='browse') renderBrowse();
+    else if(view.name==='store') renderStore();
+    else if(view.name==='stats') renderStats();
+    else if(view.name==='errors') renderErrors();
+    else if(view.name==='admin') renderAdmin();
+    else renderHome();
+  }catch(e){
+    const where = quiz ? 'quiz' : view.name;
+    lastPaintError = where + ': ' + ((e && e.message) || e);
+    logError('client', 'ציור ' + lastPaintError, null);
+    if(quiz || view.name !== 'home'){
+      quiz = null; view = {name:'home'};
+      try{ renderHome(); }catch(e2){}
+    }
+  }
   const at = quiz ? 'quiz:' + quiz.i + (quiz.done ? ':done' : '') : view.name + ':' + (view.deck || '');
   if(at !== paintedAt) window.scrollTo(0,0);
   paintedAt = at;
 }
 
 document.addEventListener('keydown', function(e){
+  /* מסך הנעילה מוצג מעל חידון שנשאר בזיכרון — לא עונים ממנו */
+  if(authEnabled && !AUTH) return;
   if(!quiz || quiz.done) return;
+  if(e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName || '')) return;
   const q = quiz.qs[quiz.i];
   if(q.answered && (e.key==='Enter'||e.key===' ')){ e.preventDefault(); next(); return; }
   const n = parseInt(e.key,10);
@@ -3951,56 +5038,122 @@ document.addEventListener('keydown', function(e){
 });
 
 /* ===========================================================
+   סנכרון מלא — נקודת כניסה אחת: באתחול, בחזרה לאפליקציה, כשהרשת
+   חוזרת, ובמרווחים אחרי כישלון. ספרייה קודם, כי מפתחות ישנים של
+   כרטיסים עוברים לפי החבילות שבה; הגדרות, יומן תקלות והרשאות במקביל.
+   קריאה בזמן ריצה נרשמת לסבב אחד נוסף. זה מה שהחליף את כפתורי
+   הרענון והאיפוס — המטמון מתעדכן לבד.
+   =========================================================== */
+let syncingAll = null, syncAllAgain = false, lastFullSync = 0;
+let retryTimer = null, retryDelay = 0;
+function syncAll(){
+  if(syncingAll){ syncAllAgain = true; return syncingAll; }
+  if(!canSync()) return Promise.resolve(false);
+  syncingAll = ensureToken()
+    .then(function(){ return (AUTH && AUTH.uid && UID) ? null : loadIdentity(); })
+    .then(function(){
+      if(!canSyncUser()) return false;
+      lastFullSync = Date.now();
+      return Promise.all([
+        syncLibrary().catch(function(){}).then(function(){ return syncCards(true); }),
+        syncSettings(),
+        flushErrors(),
+        checkAdmin(),
+        verifyAccess(false)
+      ]).then(function(){ return LIB.status === 'ok'; });
+    })
+    .catch(function(err){
+      logError('client', 'sync → ' + ((err && err.message) || 'נכשל'), null);
+      return false;
+    })
+    .then(function(ok){
+      syncingAll = null;
+      scheduleRetry(ok);
+      /* נושא שהגיע בקישור — נפתח כשיש כבר זהות וספרייה */
+      if(pendingShare && canSyncUser()){ const id = pendingShare; pendingShare = null; openStore(id); }
+      if(syncAllAgain){ syncAllAgain = false; return syncAll(); }
+      return ok;
+    });
+  return syncingAll;
+}
+
+/* סנכרון שנכשל (שרת רדום, רשת חלשה) — ניסיון חוזר במרווח שגדל עד
+   עשר דקות, ורק כשהאפליקציה גלויה */
+function scheduleRetry(ok){
+  if(retryTimer){ clearTimeout(retryTimer); retryTimer = null; }
+  if(ok || !AUTH){ retryDelay = 0; return; }
+  retryDelay = Math.min(600000, retryDelay ? retryDelay * 2 : 30000);
+  retryTimer = setTimeout(function(){
+    retryTimer = null;
+    if(document.visibilityState === 'hidden') return;   /* החזרה לאפליקציה תסנכרן */
+    syncAll();
+  }, retryDelay);
+}
+
+/* גרסה חדשה של האפליקציה נבדקת גם כשהיא נשארת פתוחה ימים, לא רק בטעינה */
+let lastUpdateCheck = 0;
+function checkForUpdate(){
+  if(Date.now() - lastUpdateCheck < 1800000) return;
+  lastUpdateCheck = Date.now();
+  try{
+    if(navigator.serviceWorker && navigator.serviceWorker.getRegistration)
+      navigator.serviceWorker.getRegistration()
+        .then(function(r){ return r && r.update(); }).catch(function(){});
+  }catch(e){}
+}
+
+/* חזרה לאפליקציה: סנכרון מלא אם עברה דקה, אחרת רק שליחה של מה
+   שממתין. יציאה ממנה: שליחה, לפני שהמערכת מקפיאה את הדף. */
+function resync(){
+  if(!AUTH) return;
+  checkForUpdate();
+  ensureToken(false).then(function(){
+    if(!canSync()) return;
+    if(Date.now() - lastFullSync > 60000) syncAll();
+    else syncCards(false);
+  });
+}
+addEventListener('visibilitychange', function(){
+  if(!AUTH) return;
+  if(document.visibilityState === 'visible') resync();
+  else if(canSyncUser() && (Object.keys(DIRTY).length || LOGQ.length)) syncCards(false);
+});
+addEventListener('online', function(){ if(AUTH) syncAll(); });
+addEventListener('pageshow', function(e){ if(e.persisted) resync(); });
+
+/* ===========================================================
    רצף העלייה. סדר אחד, מפורש, ובודק תלויות במקום להניח אותן.
-   קודם מצייר ממה שיש במכשיר — כך שאין מסך ריק — ורק אחר כך פונה
-   לשרת. כל מה שדורש uid ממתין לזהות במקום לחזור בשקט עם "ריק".
+   קודם קושרים את המשתמש לפי הטוקן (בלי רשת) ומציירים את הנתונים
+   שלו מהמכשיר — כך שאין מסך ריק ואין נתונים של מישהו אחר — ורק אחר
+   כך פונים לשרת. כל מה שדורש uid ממתין לזהות.
    =========================================================== */
 let booted = false;
 function boot(){
   if(booted) return Promise.resolve();
   booted = true;
 
+  fillFromClaims();
+  bindUser(AUTH ? authUid() : null);
   renderNow();                       /* מיידי, מהמטמון */
-  if(!canSync()){
-    if(authEnabled) loadIdentity();
-    return Promise.resolve();
-  }
+  if(!canSync()) return Promise.resolve();
 
   scheduleRefresh();
   return ensureToken()               /* טוקן תקף לפני כל קריאה */
-    .then(loadIdentity)              /* זהות אחת, לפני כל השאר */
-    .then(function(){
-      if(!AUTH){ render(); return; }
-      /* מכאן והלאה יש uid, ואפשר לשגר במקביל */
-      return Promise.all([
-        loadLibrary(),
-        pullSettings(),
-        pullCards(),
-        flushQueue(),
-        flushErrors(),
-        checkAdmin(),
-        verifyAccess(false)
-      ]);
-    })
-    .then(function(){
-      if(pendingShare && AUTH){
-        const id = pendingShare; pendingShare = null; openStore(id);
-      }
-      render();
-    })
+    .then(function(){ return loadIdentity(); })   /* זהות אחת, לפני כל השאר */
+    .then(function(){ return syncAll(); })
     .catch(function(err){
       logError('client', 'boot → ' + ((err && err.message) || 'נכשל'), null);
       render();
     });
 }
 
-/* קישור לנושא — פותח את המאגר עם הנושא בראש הרשימה */
+/* קישור לנושא — נפתח במאגר, עם הנושא בראש הרשימה, אחרי הסנכרון
+   הראשון. בלי מפגש הוא עובר דרך ההתחברות עם גוגל (signIn). */
 (function(){
   const shared = new URLSearchParams(location.search).get('deck');
   if(!shared) return;
   history.replaceState(null, '', location.pathname);
-  const open = function(){ if(canSync()) openStore(shared); };
-  if(AUTH) setTimeout(open, 400); else pendingShare = shared;
+  if(/^[0-9a-f-]{36}$/i.test(shared)) pendingShare = shared;
 })();
 
 boot();

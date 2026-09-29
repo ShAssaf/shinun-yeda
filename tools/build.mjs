@@ -25,12 +25,23 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
   addEventListener('load', function () {
     navigator.serviceWorker.register('./sw.js').catch(function () {});
   });
-  /* גרסה חדשה תפסה שליטה — נטענים מחדש פעם אחת כדי להציג אותה */
+  /* גרסה חדשה תפסה שליטה — נטענים מחדש פעם אחת כדי להציג אותה.
+     לא בביקור הראשון (אין גרסה קודמת להחליף, וזו הייתה טעינה מחדש
+     בלי סיבה), ולא באמצע חידון או גיליון פתוח: הטעינה נדחית עד שאין
+     מה לאבד. התרגול עצמו כבר שמור במכשיר, אבל הסבב שבאמצע לא. */
+  var hadController = !!navigator.serviceWorker.controller;
   var swReloaded = false;
-  navigator.serviceWorker.addEventListener('controllerchange', function () {
+  var reloadWhenIdle = function () {
     if (swReloaded) return;
+    var busy = false;
+    try { busy = !!(quiz && !quiz.done) || !!document.querySelector('.sheet-bg'); } catch (e) {}
+    if (busy) { setTimeout(reloadWhenIdle, 5000); return; }
     swReloaded = true;
     location.reload();
+  };
+  navigator.serviceWorker.addEventListener('controllerchange', function () {
+    if (!hadController) { hadController = true; return; }
+    reloadWhenIdle();
   });
 }
 </script>
@@ -42,15 +53,17 @@ const parsed = JSON.parse(raw);           /* אימות — בנייה נכשל�
 
 /* </script> בתוך מחרוזת היה סוגר את התג המכיל */
 const inlined = JSON.stringify(parsed).replace(/<\//g, '<\\/');
+/* פונקציית החלפה ולא מחרוזת: $& או $' בתוך התוכן היו משכפלים קטעים מהתבנית */
 let withData = template.replace('<!--DECK_DATA-->',
-  '<script id="deck-data" type="application/json">' + inlined + '</script>');
+  () => '<script id="deck-data" type="application/json">' + inlined + '</script>');
 if (withData === template) throw new Error('לא נמצא מציין המיקום <!--DECK_DATA-->');
 
 let cfg = {};
 try { cfg = JSON.parse(await readFile(CONFIG, 'utf8')); } catch {}
-withData = withData.replace('<!--APP_CONFIG-->',
-  '<script id="app-config" type="application/json">'
-  + JSON.stringify(cfg).replace(/<\//g, '<\\/') + '</script>');
+if (!withData.includes('<!--APP_CONFIG-->')) throw new Error('לא נמצא מציין המיקום <!--APP_CONFIG-->');
+const cfgTag = '<script id="app-config" type="application/json">'
+  + JSON.stringify(cfg).replace(/<\//g, '<\\/') + '</script>';
+withData = withData.replace('<!--APP_CONFIG-->', () => cfgTag);
 
 /* ---- www/index.html ---- */
 let pwa = withData;
@@ -62,7 +75,7 @@ if (offlineFonts) {
     .replace(/<link rel="stylesheet" href="https:\/\/fonts\.googleapis\.com[^>]*>/,
              '<link rel="stylesheet" href="fonts.css">');
 }
-pwa = pwa.replace(/(<\/title>\n)/, '$1' + PWA_HEAD) + PWA_TAIL;
+pwa = pwa.replace(/(<\/title>\n)/, (m) => m + PWA_HEAD) + PWA_TAIL;
 /* חתימת הבנייה נכנסת לדף כדי שכל תקלה ביומן תסגיר מאיזו גרסה הגיעה */
 const build = createHash('sha256').update(withData).digest('hex').slice(0, 12);
 pwa = pwa.replace('__BUILD__', build);
@@ -75,7 +88,14 @@ await writeFile(join(ROOT, 'www', 'index.html'), pwa, 'utf8');
    גם קוד ה-SW נכנס לטביעה: שינוי בו בלבד חייב שם קאש חדש, אחרת
    הקאש הישן שורד את ההתקנה. */
 const swSrc = await readFile(join(ROOT, 'src', 'sw.js'), 'utf8');
-const stamp = createHash('sha256').update(pwa).update(swSrc).digest('hex').slice(0, 12);
+/* גם הקבצים שה-SW מגיש מהקאש קודם — גופנים, אייקונים, manifest. שינוי
+   רק באחד מהם חייב קאש חדש, אחרת הישן ממשיך להיות מוגש. */
+const stampHash = createHash('sha256').update(pwa).update(swSrc);
+for (const f of ['fonts.css', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png',
+                 'icons/maskable-512.png', 'icons/apple-touch-icon.png']) {
+  try { stampHash.update(await readFile(join(ROOT, 'www', f))); } catch {}
+}
+const stamp = stampHash.digest('hex').slice(0, 12);
 const sw = swSrc.replace('__BUILD__', stamp);
 if (sw.includes('__BUILD__')) throw new Error('לא הוחלף מציין הגרסה ב-sw.js');
 await writeFile(join(ROOT, 'www', 'sw.js'), sw, 'utf8');

@@ -10,6 +10,14 @@ import { JSDOM, VirtualConsole } from 'jsdom';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ROUNDS = 8;          /* כל מצב נבנה כמה פעמים — הבחירה אקראית */
 const fail = [];
+/* קריסה של הבדיקה עצמה (eval שזרק, הבטחה שנדחתה) לא תבלע את מה שכבר
+   נמצא — הרשימה מודפסת גם אם התהליך נופל באמצע */
+let reported = false;
+process.on('unhandledRejection', (e) => { fail.push('דחייה לא מטופלת: ' + ((e && e.message) || e)); });
+process.on('exit', () => {
+  if (!reported && fail.length)
+    console.error('בדיקת העשן נכשלה לפני הסוף:\n' + [...new Set(fail)].map((f) => '  · ' + f).join('\n'));
+});
 
 const html = await readFile(join(ROOT, 'www', 'index.html'), 'utf8');
 
@@ -45,6 +53,38 @@ const check = (cond, msg) => { if (!cond) fail.push(msg); };
 /* אין יותר נפילה אוטומטית לתוכן המוטמע — הבדיקה טוענת ספרייה במפורש,
    בדיוק כמו משתמש שהתוכן שלו הגיע מהשרת. */
 win.eval('(function(){ LIB.status="ok"; LIB.rows = localRows(); applyRows(); renderNow(); })()');
+
+/* עזרים לבדיקות הסנכרון, בתוך הדף:
+   __session(uid) — מפגש עם JWT תקף שמכיל sub, כך שאין רענון שנופל לתוך ה-mock
+   __mock(handler) — מחליף את fetch, מתעד כל בקשה (כותרות באותיות קטנות, גוף מפוענח)
+                     ועונה לפי handler({url, method, headers, body}) → {status, body|text} */
+win.eval(`
+  window.__session = function(uid){
+    const good = Math.floor(Date.now()/1000) + 3600;
+    return {access:'h.' + btoa(JSON.stringify({exp:good, sub:uid, email:uid + '@t'})) + '.s',
+            refresh:'r-' + uid, uid:uid, email:uid + '@t'};
+  };
+  window.__mock = function(handler){
+    const sent = [], real = fetch;
+    fetch = function(url, init){
+      const h = (init && init.headers) || {}, hdr = {};
+      Object.keys(h).forEach(function(k){ hdr[k.toLowerCase()] = h[k]; });
+      const req = {url:String(url), method:(init && init.method) || 'GET', headers:hdr,
+                   body:init && init.body ? JSON.parse(init.body) : null};
+      sent.push(req);
+      const res = handler(req) || {status:200, body:[]};
+      const text = res.text != null ? res.text : JSON.stringify(res.body === undefined ? [] : res.body);
+      return Promise.resolve({ok:res.status >= 200 && res.status < 300, status:res.status,
+        json:function(){ return Promise.resolve(text ? JSON.parse(text) : null); },
+        text:function(){ return Promise.resolve(text); }});
+    };
+    return {sent:sent, restore:function(){ fetch = real; }};
+  };
+  window.__quiet = function(){
+    if(cardSyncTimer){ clearTimeout(cardSyncTimer); cardSyncTimer = null; }
+    cardSync = null; cardSyncAgain = false; cardSyncFull = false;
+  };
+`);
 
 /* 1 — מסך הבית עלה */
 check(!!document.querySelector('.deck-list'), 'מסך הבית לא נרנדר');
@@ -323,7 +363,8 @@ try {
 
     LIB.status='cached'; LIB.reason='HTTP 503'; applyRows(); renderNow();
     out.cached = {decks:DECKS.length, warns:app.innerHTML.indexOf('מוצג מהמטמון המקומי') > -1,
-                  reason:app.innerHTML.indexOf('HTTP 503') > -1};
+                  reason:app.innerHTML.indexOf('HTTP 503') > -1,
+                  button:!!document.getElementById('refreshLib')};
 
     LIB.status='ok'; LIB.reason=null; applyRows(); renderNow();
     return JSON.stringify(out);
@@ -335,6 +376,7 @@ try {
   check(states.cached.decks > 0, 'מטמון לא מוצג');
   check(states.cached.warns, 'הצגת מטמון ישן לא מסומנת למשתמש');
   check(states.cached.reason, 'אזהרת המטמון לא מציגה את הסיבה');
+  check(!states.cached.button, 'כפתור רענון המטמון עדיין מוצג — הסנכרון אמור לחזור לבד');
   check(states.boot.decks > 0 && !states.boot.warns, 'אזהרת המטמון מופיעה בפתיחה לפני שנוסה השרת');
 }
 
@@ -426,15 +468,31 @@ try {
   check(r.hasScreen, 'לא נשמר המסך שבו קרתה התקלה');
   check(r.hasUa, 'לא נשמר הדפדפן');
 
-  /* דיווח שנכשל לא מייצר תקלה נוספת — אחרת נוצרת לולאה */
-  const noLoop = JSON.parse(win.eval(`(function(){
-    ERRQ = [];
-    logging = true;
-    logError('client', 'לא אמור להירשם');
-    logging = false;
-    return JSON.stringify({n: ERRQ.length});
+  /* דיווח שנכשל לא מייצר תקלה נוספת (אחרת נוצרת לולאה), אבל תקלה אחרת
+     שקורית בזמן השליחה נרשמת — פעם היא נבלעה */
+  const noLoop = JSON.parse(await win.eval(`(function(){
+    const save = {AUTH:AUTH, UID:UID}, realFetch = fetch;
+    ERRQ = [{kind:'client', message:'ממתין בתור', context:null, at:new Date().toISOString(), uid:null}];
+    logging = false; loggingAgain = false;
+    AUTH = __session('u-err'); UID = 'u-err';
+    const sent = [];
+    fetch = function(url, init){
+      sent.push(JSON.parse(init.body));
+      return Promise.resolve({ok:false, status:500, json:function(){ return Promise.resolve({}); },
+                              text:function(){ return Promise.resolve(''); }});
+    };
+    const p = flushErrors();
+    logError('fetch', 'תקלה אחרת בזמן השליחה', null);
+    return p.then(function(){ return new Promise(function(r){ setTimeout(r, 60); }); }).then(function(){
+      fetch = realFetch; AUTH = save.AUTH; UID = save.UID;
+      const out = {n: ERRQ.length, stamped: sent.length ? sent[0].every(function(x){ return x.user_id === 'u-err' && x.at && !('uid' in x); }) : false};
+      ERRQ = []; logging = false; loggingAgain = false;
+      jwrite(ERRQ_KEY, ERRQ);
+      return JSON.stringify(out);
+    });
   })()`));
-  check(noLoop.n === 0, 'לכידה בזמן דיווח יוצרת לולאה');
+  check(noLoop.n === 2, `שליחה שנכשלה או תקלה במקביל: ${noLoop.n} רשומות במקום 2`);
+  check(noLoop.stamped, 'שורת יומן נשלחה בלי user_id, בלי זמן התקלה, או עם שדה מקומי');
 
   try {
     win.eval(`(function(){
@@ -457,9 +515,15 @@ try {
 {
   const src = win.eval('boot.toString()');
   check(src.indexOf('renderNow()') > -1, 'העלייה לא מציירת מיידית מהמטמון');
-  check(src.indexOf('loadIdentity()') < src.indexOf('loadLibrary()'),
-    'הספרייה נמשכת לפני שהזהות נפתרה');
+  check(src.indexOf('bindUser(') > -1 && src.indexOf('bindUser(') < src.indexOf('renderNow()'),
+    'הציור הראשון קורה לפני שנקבע של מי הנתונים');
+  check(src.indexOf('loadIdentity()') > -1 && src.indexOf('loadIdentity()') < src.indexOf('syncAll()'),
+    'הסנכרון רץ לפני שהזהות נפתרה');
   check(src.indexOf('booted') > -1, 'העלייה יכולה לרוץ פעמיים');
+  const all = win.eval('syncAll.toString()');
+  ['syncLibrary()', 'syncCards(true)', 'syncSettings()', 'flushErrors()', 'checkAdmin()'].forEach(function(x){
+    check(all.indexOf(x) > -1, 'הסנכרון המלא לא כולל ' + x);
+  });
 
   /* קריאות render מרובות מתאחדות לציור אחד */
   const coalesced = JSON.parse(win.eval(`(function(){
@@ -529,8 +593,19 @@ try {
 /* 5i — כפתור «למה»: ניתן לנסות שוב אחרי כישלון, ושולח שאלה ותשובה לא ריקות */
 {
   const src = win.eval('renderQuiz.toString()');
-  check(src.indexOf('if(q.whyBusy || whyFor(q.key)) return;') > -1,
+  check(src.indexOf('if(q.whyBusy || whyFor(whyKeyOf(q))) return;') > -1,
     'כישלון קודם חוסם ניסיון חוזר של «למה»');
+  /* הסבר נכתב על טעות מסוימת: תשובה אחרת או תיקון בכרטיס = מפתח אחר */
+  const wk = JSON.parse(win.eval(`(function(){
+    const mk = function(ans, main){ return {key:'d:a', label:'L', prompt:{kind:'text', main:'x'},
+      options:[{id:'a',main:main||'A'},{id:'b',main:'B'},{id:'c',main:'C'}], answer:'a', answered:ans}; };
+    const k1 = whyKeyOf(mk('b'));
+    return JSON.stringify({chosen: k1 !== whyKeyOf(mk('c')), edit: k1 !== whyKeyOf(mk('b', 'A2')),
+                           stable: k1 === whyKeyOf(mk('b'))});
+  })()`));
+  check(wk.chosen, 'הסבר לתשובה אחת מוצג גם כשנבחרה תשובה אחרת');
+  check(wk.edit, 'הסבר ישן מוצג אחרי תיקון הכרטיס');
+  check(wk.stable, 'מפתח ההסבר לא יציב');
   check(src.indexOf("logError('function', 'explain") > -1, 'כישלון «למה» לא נרשם ביומן');
   check(win.eval('callFn.toString()').indexOf('ensureToken()') > -1,
     'קריאה לפונקציה לא מוודאת טוקן תקף');
@@ -580,20 +655,15 @@ try {
   check(storeSrc.indexOf('data-link') > -1, 'אין העתקת קישור במאגר');
 }
 
-/* 5k — איפוס מטמון מדווח תוצאה ולא מרענן בעיוורון */
+/* 5k — אין כפתור איפוס או רענון של המטמון המקומי: הסנכרון מתעדכן לבד
+   (חזרה לאפליקציה, חזרת רשת, ניסיון חוזר במרווחים) */
 {
-  const src = win.eval('hardReset.toString()');
-  check(src.indexOf('location.reload') < 0, 'האיפוס עדיין מרענן בעיוורון');
-  check(src.indexOf('caches.keys') > -1, 'האיפוס לא מנקה את מטמון ה-service worker');
-  check(src.indexOf('loadLibrary') > -1, 'האיפוס לא מושך מחדש');
-
-  const report = win.eval(`(function(){
-    return hardReset().then(function(r){ return typeof r === 'string' && r.length > 0; });
-  })()`);
-  check(report instanceof win.Promise || report === true || report,
-    'האיפוס לא מחזיר דיווח');
-  check(win.eval('renderStore.toString()').indexOf('diag-report') > -1,
-    'הדיווח לא מוצג במסך');
+  check(win.eval('typeof hardReset') === 'undefined', 'פונקציית איפוס המטמון עדיין קיימת');
+  const storeSrc = win.eval('renderStore.toString()');
+  check(storeSrc.indexOf('wipeCache') < 0, 'כפתור "אפס מטמון מקומי" עדיין במאגר');
+  check(win.eval('renderHome.toString()').indexOf('refreshLib') < 0, 'כפתור "רענן" עדיין בבית');
+  const tail = win.eval('syncAll.toString() + scheduleRetry.toString() + resync.toString()');
+  check(tail.indexOf('scheduleRetry(') > -1, 'סנכרון שנכשל לא מנסה שוב לבד');
 }
 
 /* 5l — הוספת תוכן מרעננת את הספרייה ולא מבקשת רענון ידני */
@@ -747,7 +817,8 @@ try {
 {
   check(win.eval('typeof pullSettings') === 'function', 'אין משיכת הגדרות מהשרת');
   check(win.eval('typeof pushSettings') === 'function', 'אין שמירת הגדרות בשרת');
-  check(win.eval('boot.toString()').indexOf('pullSettings()') > -1,
+  check(win.eval('syncSettings.toString()').indexOf('pullSettings()') > -1 &&
+        win.eval('syncAll.toString()').indexOf('syncSettings()') > -1,
     'ההגדרות לא נמשכות בעלייה');
   check(win.eval('next.toString()').indexOf('pushSettings()') > -1,
     'סיום סבב לא נשמר בשרת');
@@ -757,20 +828,407 @@ try {
 
   /* כתיבות מהירות מתאחדות */
   const merged = JSON.parse(await win.eval(`(function(){
-    const realRest = rest, save = AUTH;
+    const realRest = rest, save = {AUTH:AUTH, UID:UID};
     let calls = 0;
-    AUTH = Object.assign({}, AUTH || {}, {uid:'u'});
-    pushingSettings = null;
+    AUTH = __session('u'); UID = 'u';
+    pushingSettings = null; settingsAgain = false;
     rest = function(){ calls++; return Promise.resolve({ok:true}); };
     const a = pushSettings(), b = pushSettings(), c = pushSettings();
     const shared = (a === b) && (b === c);
     return Promise.all([a,b,c]).then(function(){
-      rest = realRest; AUTH = save;
+      rest = realRest; AUTH = save.AUTH; UID = save.UID;
       return JSON.stringify({calls:calls, shared:shared});
     });
   })()`));
   check(merged.shared, 'כתיבות הגדרות מקבילות לא התאחדו');
   check(merged.calls === 1, 'נשלחו ' + merged.calls + ' בקשות הגדרות במקום אחת');
+
+  /* שינוי שנעשה בזמן שליחה נשלח מיד אחריה — פעם הוא נבלע, והמשיכה
+     הבאה החזירה את התאריך שנמחק */
+  const trail = JSON.parse(await win.eval(`(function(){
+    const realRest = rest, save = {AUTH:AUTH, UID:UID, store:store};
+    AUTH = __session('uT'); UID = 'uT'; store = defaultSettings();
+    const bodies = []; let release;
+    rest = function(path, init){
+      bodies.push({body:JSON.parse(init.body), prefer:(init.headers || {}).Prefer});
+      if(bodies.length === 1) return new Promise(function(r){ release = function(){ r({ok:true}); }; });
+      return Promise.resolve({ok:true});
+    };
+    pushingSettings = null; settingsAgain = false;
+    setExamDate('2027-01-01'); const a = pushSettings();
+    setExamDate(null); pushSettings();
+    release();
+    return a.then(function(){
+      rest = realRest;
+      const last = bodies[bodies.length - 1];
+      const out = {calls:bodies.length, last:last.body.exam_date, at:last.body.updated_at,
+                   examAt:new Date(store.examAt).toISOString(), dirty:store.dirty, prefer:last.prefer};
+      localStorage.removeItem('bio-quiz-v2:uT');
+      AUTH = save.AUTH; UID = save.UID; store = save.store; pushingSettings = null;
+      return JSON.stringify(out);
+    });
+  })()`));
+  check(trail.calls === 2, 'שינוי בזמן שליחה לא נשלח: ' + trail.calls + ' בקשות');
+  check(trail.last === null, 'נשלח התאריך הישן במקום המחיקה');
+  check(trail.at === trail.examAt, 'updated_at אינו זמן השינוי — השרת לא יוכל להכריע מי חדש יותר');
+  check(trail.dirty === false, 'שינוי שנשמר בשרת נשאר מסומן כלא נשלח');
+  check(String(trail.prefer).indexOf('merge-duplicates') > -1, 'שמירת ההגדרות בלי upsert');
+
+  /* משיכה: תאריך חדש יותר מהשרת מנצח; שינוי מקומי שלא נשלח לא נדרס */
+  const pull = JSON.parse(await win.eval(`(function(){
+    const save = {AUTH:AUTH, UID:UID, store:store};
+    AUTH = __session('uQ'); UID = 'uQ';
+    const out = {};
+    const serverRow = function(at){ return [{exam_date:'2027-02-02', rounds:5, updated_at:new Date(at).toISOString()}]; };
+    store = {rounds:3, examDate:'2027-01-01', examAt:Date.now() - 60000, dirty:false};
+    let m = __mock(function(){ return {status:200, body:serverRow(Date.now())}; });
+    return pullSettings().then(function(){
+      m.restore();
+      out.newer = store.examDate + '|' + store.rounds;
+      store = {rounds:9, examDate:'2027-03-03', examAt:Date.now(), dirty:true};
+      m = __mock(function(){ return {status:200, body:serverRow(Date.now() - 3600000)}; });
+      return pullSettings();
+    }).then(function(){
+      m.restore();
+      out.kept = store.examDate + '|' + store.rounds;
+      localStorage.removeItem('bio-quiz-v2:uQ');
+      AUTH = save.AUTH; UID = save.UID; store = save.store;
+      return JSON.stringify(out);
+    });
+  })()`));
+  check(pull.newer === '2027-02-02|5', 'תאריך חדש מהשרת לא התקבל: ' + pull.newer);
+  check(pull.kept === '2027-03-03|9', 'שינוי מקומי שלא נשלח נדרס מהשרת: ' + pull.kept);
+}
+
+/* 5s — rest() שומר את כותרות הקורא (Prefer), וההרשאה הטרייה גוברת.
+   פעם הכותרות הוחלפו כולן, וכל upsert הפך להוספה שנדחתה ב-409. */
+{
+  const hdr = JSON.parse(await win.eval(`(function(){
+    const save = AUTH; AUTH = __session('uH');
+    const m = __mock(function(){ return {status:200, body:[]}; });
+    return rest('x', {method:'POST', headers:{Prefer:'resolution=merge-duplicates', Authorization:'Bearer stale'}, body:'[]'})
+      .then(function(){
+        m.restore(); AUTH = save;
+        const h = m.sent[0].headers;
+        return JSON.stringify({prefer:h.prefer, auth:h.authorization});
+      });
+  })()`));
+  check(hdr.prefer === 'resolution=merge-duplicates', 'rest() זרק את כותרת Prefer של הקורא');
+  check(hdr.auth !== 'Bearer stale' && String(hdr.auth).indexOf('Bearer h.') === 0, 'rest() שלח הרשאה ישנה');
+}
+
+/* 5t — סנכרון הכרטיסים: משיכה, איחוד לפי החזרה המאוחרת, ושליחה עם
+   user_id, מפתח אחד לכל כרטיס, ויומן עם מזהה וזמן החזרה */
+{
+  const r = JSON.parse(await win.eval(`(function(){
+    __quiet();
+    const save = {AUTH:AUTH, UID:UID, CARDS:CARDS, DIRTY:DIRTY, LOGQ:LOGQ};
+    AUTH = __session('uS'); UID = 'uS';
+    const T = Date.now(), D = 86400000;
+    CARDS = {
+      'd1:a': {s:2, d:5, due:T+D, last:T-1000,  reps:2, lapses:0},    /* מקומי חדש מהשרת */
+      'd1:b': {s:1, d:5, due:T+D, last:T-5*D,   reps:1, lapses:0},    /* השרת חדש יותר */
+      'd1:c': {s:1, d:5, due:T+D, last:T-D,     reps:1, lapses:0}     /* אין בשרת בכלל */
+    };
+    DIRTY = {'d1:a':1};
+    LOGQ = [
+      {id:'11111111-1111-4111-8111-111111111111', card_key:'d1:a', rating:3, elapsed_days:null, duration_ms:900, reviewed_at:new Date(T-2000).toISOString()},
+      {id:'22222222-2222-4222-8222-222222222222', card_key:'d1:a', rating:4, elapsed_days:0, duration_ms:700, reviewed_at:new Date(T-1000).toISOString()}
+    ];
+    const server = [
+      {card_key:'d1:a', stability:1, difficulty:5, due:new Date(T).toISOString(), last_review:new Date(T-3*D).toISOString(), reps:1, lapses:0},
+      {card_key:'d1:b', stability:9, difficulty:4, due:new Date(T+9*D).toISOString(), last_review:new Date(T-D/2).toISOString(), reps:4, lapses:0}
+    ];
+    const m = __mock(function(req){
+      if(req.method === 'GET' && req.url.indexOf('/rest/v1/card_state') > -1)
+        return {status:200, body:req.url.indexOf('offset=0') > -1 ? server : []};
+      return {status:201, text:''};
+    });
+    return syncCards(true).then(function(ok){
+      m.restore();
+      const post = function(t){ return m.sent.filter(function(x){ return x.method === 'POST' && x.url.indexOf('/rest/v1/' + t) > -1; }); };
+      const cs = post('card_state'), lg = post('review_log');
+      const out = {
+        ok: ok,
+        pullOwn: m.sent.some(function(x){ return x.method === 'GET' && x.url.indexOf('user_id=eq.uS') > -1; }),
+        csUrl: cs[0] ? cs[0].url : '', csPrefer: cs[0] ? cs[0].headers.prefer : '',
+        csKeys: cs[0] ? cs[0].body.map(function(x){ return x.card_key; }).sort().join(',') : '',
+        csUser: cs[0] ? cs[0].body.every(function(x){ return x.user_id === 'uS'; }) : false,
+        csKeysets: cs[0] ? new Set(cs[0].body.map(function(x){ return Object.keys(x).sort().join(); })).size : 0,
+        csNewest: cs[0] ? (cs[0].body.filter(function(x){ return x.card_key === 'd1:a'; })[0] || {}).reps : 0,
+        bAdopted: CARDS['d1:b'].reps === 4 && CARDS['d1:b'].s === 9,
+        lgUrl: lg[0] ? lg[0].url : '', lgPrefer: lg[0] ? lg[0].headers.prefer : '',
+        lgRows: lg[0] ? lg[0].body.length : 0,
+        lgFields: lg[0] ? lg[0].body.every(function(x){ return x.user_id === 'uS' && x.client_id && x.reviewed_at && !('id' in x); }) : false,
+        lgKeysets: lg[0] ? new Set(lg[0].body.map(function(x){ return Object.keys(x).sort().join(); })).size : 0,
+        dirtyLeft: Object.keys(DIRTY).length, logLeft: LOGQ.length
+      };
+      ['shinun-cards:uS','shinun-dirty:uS','shinun-log:uS'].forEach(function(k){ localStorage.removeItem(k); });
+      AUTH = save.AUTH; UID = save.UID; CARDS = save.CARDS; DIRTY = save.DIRTY; LOGQ = save.LOGQ;
+      return JSON.stringify(out);
+    });
+  })()`));
+  check(r.ok, 'סנכרון הכרטיסים לא הושלם');
+  check(r.pullOwn, 'משיכת הכרטיסים לא מסוננת למשתמש');
+  check(r.csUrl.indexOf('on_conflict=user_id,card_key') > -1, 'upsert של card_state בלי on_conflict');
+  check(String(r.csPrefer).indexOf('resolution=merge-duplicates') > -1, 'upsert של card_state בלי Prefer');
+  check(r.csKeys === 'd1:a,d1:c', 'נשלחו הכרטיסים הלא נכונים: ' + r.csKeys);
+  check(r.csUser, 'שורת card_state נשלחה בלי user_id');
+  check(r.csKeysets === 1, 'לשורות card_state ערכות מפתחות שונות');
+  check(r.csNewest === 2, 'נשלח מצב ישן של הכרטיס');
+  check(r.bAdopted, 'מצב חדש יותר מהשרת לא התקבל');
+  check(r.lgUrl.indexOf('on_conflict=user_id,client_id') > -1, 'יומן החזרות בלי on_conflict — שליחה חוזרת תכפיל');
+  check(String(r.lgPrefer).indexOf('ignore-duplicates') > -1, 'יומן החזרות בלי ignore-duplicates');
+  check(r.lgRows === 2 && r.lgFields, 'יומן החזרות לא נשלח במלואו (user_id, client_id, reviewed_at)');
+  check(r.lgKeysets === 1, 'לשורות היומן ערכות מפתחות שונות');
+  check(r.dirtyLeft === 0 && r.logLeft === 0, `התור לא התרוקן אחרי הצלחה: ${r.dirtyLeft}/${r.logLeft}`);
+
+  /* כישלונות: 500 משאיר הכול; עמודה שעוד לא קיימת (לפני המיגרציה)
+     משאירה את היומן; נתון פסול (23514) נזרק כדי לא לחסום לנצח */
+  const f = JSON.parse(await win.eval(`(function(){
+    __quiet();
+    const save = {AUTH:AUTH, UID:UID, CARDS:CARDS, DIRTY:DIRTY, LOGQ:LOGQ};
+    AUTH = __session('uF'); UID = 'uF';
+    const T = Date.now();
+    const reset = function(){
+      CARDS = {'d2:x': {s:1, d:5, due:T+1e7, last:T, reps:1, lapses:0}};
+      DIRTY = {'d2:x':1};
+      LOGQ = [{id:'33333333-3333-4333-8333-333333333333', card_key:'d2:x', rating:2, elapsed_days:null, duration_ms:10, reviewed_at:new Date(T).toISOString()}];
+    };
+    const out = {};
+    const run = function(csStatus, lgStatus, lgText){
+      reset(); __quiet();
+      const m = __mock(function(req){
+        if(req.url.indexOf('/rest/v1/card_state') > -1) return {status:csStatus, text:''};
+        if(req.url.indexOf('/rest/v1/review_log') > -1) return {status:lgStatus, text:lgText || ''};
+        return {status:201, text:''};
+      });
+      return syncCards(false).then(function(){ m.restore(); return Object.keys(DIRTY).length + '/' + LOGQ.length; });
+    };
+    return run(500, 201).then(function(x){ out.down = x;
+      return run(201, 400, '{"code":"PGRST204","message":"Could not find the client_id column"}'); })
+    .then(function(x){ out.premig = x; return run(201, 400, '{"code":"23514","message":"check"}'); })
+    .then(function(x){ out.poison = x;
+      ['shinun-cards:uF','shinun-dirty:uF','shinun-log:uF'].forEach(function(k){ localStorage.removeItem(k); });
+      AUTH = save.AUTH; UID = save.UID; CARDS = save.CARDS; DIRTY = save.DIRTY; LOGQ = save.LOGQ;
+      ERRQ = []; jwrite(ERRQ_KEY, ERRQ);
+      return JSON.stringify(out);
+    });
+  })()`));
+  check(f.down === '1/1', 'שרת שנפל מחק מהתור: ' + f.down);
+  check(f.premig === '0/1', 'לפני המיגרציה היומן אמור להמתין: ' + f.premig);
+  check(f.poison === '0/0', 'אצווה פסולה חוסמת את היומן לנצח: ' + f.poison);
+}
+
+/* 5u — הפרדה בין משתמשים באותו מכשיר, והעברה מהגרסה שלא הפרידה */
+{
+  const r = JSON.parse(win.eval(`(function(){
+    __quiet();
+    const save = {AUTH:AUTH, UID:UID};
+    const T = Date.now();
+    const legacy = {s:3, d:5, due:T+86400000, last:T-1000, reps:1, lapses:0};
+    localStorage.setItem('shinun-cards', JSON.stringify({'fg:methyl': legacy}));
+    localStorage.setItem('shinun-queue', JSON.stringify([{card_key:'fg:methyl', stability:3, difficulty:5,
+      due:new Date(legacy.due).toISOString(), last_review:new Date(legacy.last).toISOString(), reps:1, lapses:0,
+      _log:{card_key:'fg:methyl', rating:3, elapsed_days:null, duration_ms:900}}]));
+    localStorage.setItem('bio-quiz-v2', JSON.stringify({rounds:7, examDate:'2027-01-01'}));
+    localStorage.setItem('shinun-rows', JSON.stringify([
+      {id:'pa', owner_id:'uA', visibility:'private', kind:'topic', title:'פרטי של A', data:[]},
+      {id:'px', owner_id:'uX', visibility:'private', kind:'topic', title:'פרטי של X', data:[]}]));
+    UID = null;
+    AUTH = __session('uA'); bindUser('uA');
+    const out = {};
+    out.adopted = !!CARDS['fg:methyl'] && DIRTY['fg:methyl'] === 1;
+    out.log = LOGQ.length === 1 && !!LOGQ[0].id && LOGQ[0].reviewed_at === new Date(legacy.last).toISOString();
+    out.settings = store.rounds === 7 && store.examDate === '2027-01-01' && store.dirty === true;
+    out.rows = LIB.rows.map(function(x){ return x.id; }).join(',');
+    out.legacyGone = ['shinun-cards','shinun-queue','bio-quiz-v2','shinun-rows']
+      .every(function(k){ return localStorage.getItem(k) === null; });
+
+    AUTH = __session('uB'); bindUser('uB');
+    out.bClean = Object.keys(CARDS).length === 0 && LOGQ.length === 0 && store.rounds === 0 &&
+                 !store.examDate && LIB.rows.length === 0 && LIB.status === 'unknown';
+
+    AUTH = __session('uA'); bindUser('uA');
+    hardSignOut('בדיקה');
+    out.memCleared = Object.keys(CARDS).length === 0 && UID === null && !AUTH;
+    out.diskKept = !!JSON.parse(localStorage.getItem('shinun-cards:uA') || '{}')['fg:methyl'] &&
+                   JSON.parse(localStorage.getItem('shinun-log:uA') || '[]').length === 1;
+    AUTH = __session('uA'); bindUser('uA');
+    out.back = !!CARDS['fg:methyl'] && LOGQ.length === 1 && store.rounds === 7;
+
+    storageKeys().filter(function(k){ return /:u[AB]$/.test(k); }).forEach(jremove);
+    AUTH = save.AUTH; authWrite(AUTH); bindUser(save.UID);
+    LIB.status = 'ok'; LIB.rows = localRows(); applyRows();
+    quiz = null; view = {name:'home'}; renderNow();
+    return JSON.stringify(out);
+  })()`));
+  check(r.adopted, 'כרטיס מהגרסה הקודמת לא עבר למשתמש הראשון, או לא סומן לשליחה');
+  check(r.log, 'התור הישן לא הומר ליומן עם מזהה וזמן החזרה');
+  check(r.settings, 'ההגדרות מהגרסה הקודמת לא עברו');
+  check(r.rows === 'pa', 'עברה חבילה פרטית של משתמש אחר: ' + r.rows);
+  check(r.legacyGone, 'המפתחות הישנים לא נמחקו אחרי ההעברה');
+  check(r.bClean, 'משתמש שני רואה נתונים של הראשון');
+  check(r.memCleared, 'התנתקות לא ניקתה את הזיכרון');
+  check(r.diskKept, 'התנתקות מחקה תרגול שעוד לא נשלח');
+  check(r.back, 'כניסה חוזרת לא החזירה את הנתונים של המשתמש');
+}
+
+/* 5v — מפתחות מהתקופה של התוכן המוטמע עוברים לחבילה המיובאת */
+{
+  const r = JSON.parse(win.eval(`(function(){
+    const save = {UID:UID, CARDS:CARDS, DIRTY:DIRTY, LOGQ:LOGQ, rows:LIB.rows};
+    UID = 'uR';
+    const r0 = localRows()[0], nid = '11111111-aaaa-4aaa-8aaa-111111111111';
+    LIB.rows = [{id:nid, owner_id:'uR', kind:r0.kind, title:r0.title, data:r0.data, visibility:'private'}];
+    const T = Date.now(), ok = r0.id + ':' + r0.data[0].id, nk = nid + ':' + r0.data[0].id;
+    CARDS = {}; CARDS[ok] = {s:5, d:5, due:T+1e8, last:T-1000, reps:3, lapses:0};
+    DIRTY = {}; DIRTY[ok] = 1;
+    LOGQ = [{id:'x', card_key:ok, rating:3, reviewed_at:new Date(T).toISOString()}];
+    remapLegacyKeys();
+    const out = {has:!!CARDS[nk], dirty:DIRTY[nk] === 1, oldGone:!CARDS[ok] && !DIRTY[ok], log:LOGQ[0].card_key === nk};
+    ['shinun-cards:uR','shinun-dirty:uR','shinun-log:uR'].forEach(function(k){ localStorage.removeItem(k); });
+    UID = save.UID; CARDS = save.CARDS; DIRTY = save.DIRTY; LOGQ = save.LOGQ; LIB.rows = save.rows; refreshLegacyMap();
+    return JSON.stringify(out);
+  })()`));
+  check(r.has && r.dirty, 'ההיסטוריה לא עברה למפתח של החבילה המיובאת');
+  check(r.oldGone, 'המפתח הישן נשאר ויישלח כיתום');
+  check(r.log, 'יומן החזרות לא עבר למפתח החדש');
+}
+
+/* 5w — המאגר נטען גם כשיש חבילות ציבוריות (פעם קרס: subs היה אובייקט) */
+{
+  const r = JSON.parse(await win.eval(`(function(){
+    const save = {AUTH:AUTH, UID:UID, sl:syncLibrary, fs:fetchStore, fr:fetchReviewStatus, subs:LIB.subs, rows:LIB.rows};
+    AUTH = __session('uP'); UID = 'uP';
+    LIB.subs = ['p1'];
+    LIB.rows = [{id:'m1', owner_id:'uP', kind:'topic', title:'שלי', visibility:'public', item_count:4, data:[]}];
+    syncLibrary = function(){ return Promise.resolve({ok:true}); };
+    fetchStore = function(){ return Promise.resolve({ok:true, data:[
+      {id:'p1', title:'א', item_count:5, visibility:'public', owner_id:'o'},
+      {id:'p2', title:'ב', item_count:6, visibility:'public', owner_id:'o'}]}); };
+    fetchReviewStatus = function(){ return Promise.resolve({m1:{id:'m1', review_status:'pending'}}); };
+    lastPaintError = null;
+    openStore();
+    return new Promise(function(res){ setTimeout(res, 40); }).then(function(){
+      renderNow();
+      const out = {
+        subs: Array.from(document.querySelectorAll('[data-sub]')).map(function(b){ return b.dataset.sub + ':' + b.textContent.trim(); }).join(','),
+        pending: (document.querySelector('.vis.wait') || {}).textContent || '',
+        link: document.querySelectorAll('[data-link]').length,
+        crash: lastPaintError
+      };
+      syncLibrary = save.sl; fetchStore = save.fs; fetchReviewStatus = save.fr;
+      AUTH = save.AUTH; UID = save.UID; LIB.subs = save.subs; LIB.rows = save.rows;
+      quiz = null; view = {name:'home'}; renderNow();
+      return JSON.stringify(out);
+    });
+  })()`));
+  check(!r.crash, 'המאגר קרס: ' + r.crash);
+  check(r.subs === 'p1:הסר,p2:הוסף', 'המינויים במאגר שגויים: ' + r.subs);
+  check(r.pending === 'ממתין לאישור', 'נושא שממתין לאישור לא מסומן אצל הבעלים');
+  check(r.link === 0, 'קישור שיתוף מוצע לנושא שעוד לא אושר');
+}
+
+/* 5x — ניהול: מוצג רק לאדמין; תור אישור, ציבוריות ומערכת */
+{
+  const r = JSON.parse(win.eval(`(function(){
+    const save = AUTH;
+    quiz = null;
+    AUTH = Object.assign({}, save, {admin:false}); view = {name:'home'}; renderNow();
+    const out = {hidden: !document.getElementById('adminBtn')};
+    AUTH = Object.assign({}, save, {admin:true}); ADMIN.pending = 2; renderNow();
+    const btn = document.getElementById('adminBtn');
+    out.shown = !!btn && btn.textContent.indexOf('2') > -1;
+    view = {name:'admin', tab:'queue', loading:false, loaded:true, decks:[
+      {id:'q1', title:'ממתין', review_status:'pending', visibility:'public', owner_email:'a@b', item_count:4},
+      {id:'q2', title:'אושר', review_status:'approved', visibility:'public', owner_email:'c@d', item_count:9},
+      {id:'q3', title:'נדחה', review_status:'rejected', visibility:'private', owner_email:'e@f', item_count:3, review_note:'לא מדויק'}]};
+    renderNow();
+    out.queue = [document.querySelectorAll('.arow').length, document.querySelectorAll('[data-approve]').length,
+                 document.querySelectorAll('[data-reject]').length, document.querySelectorAll('[data-adel]').length,
+                 document.querySelectorAll('[data-preview]').length].join();
+    view.tab = 'public'; renderNow();
+    out.pub = [document.querySelectorAll('.arow').length, document.querySelectorAll('[data-approve]').length,
+               document.querySelectorAll('[data-reject]').length].join();
+    view.tab = 'system'; renderNow();
+    out.sys = !!document.getElementById('syncNow') && !document.getElementById('wipeCache');
+    ADMIN.pending = 0; AUTH = save; view = {name:'home'}; renderNow();
+    return JSON.stringify(out);
+  })()`));
+  check(r.hidden, 'כפתור הניהול מוצג למי שאינו אדמין');
+  check(r.shown, 'כפתור הניהול לא מוצג לאדמין, או בלי מספר הממתינים');
+  check(r.queue === '1,1,1,1,1', 'תור האישור שגוי (שורות,אשר,דחה,מחק,תצוגה): ' + r.queue);
+  check(r.pub === '2,0,1', 'לשונית הציבוריות שגויה (שורות,אשר,הסתר): ' + r.pub);
+  check(r.sys, 'לשונית המערכת חסרה את "סנכרן עכשיו" או עדיין מציעה איפוס מטמון');
+  check(win.eval('parentOf(null, {name:"browse", preview:{}, fromTab:"queue"}).name') === 'admin',
+    'אחורה מתצוגה מקדימה לא חוזר לניהול');
+}
+
+/* 5y — תוכן ציבורי לא יכול להזריק HTML, ושורה פגומה לא מפילה את הספרייה */
+{
+  const r = JSON.parse(win.eval(`(function(){
+    const out = {};
+    out.esc = esc('"' + "'" + '<>&');
+    out.color = safeColor('red" onmouseover="x', 'var(--c-o)');
+    out.good = [safeColor('var(--c-n)'), safeColor('#abc'), safeColor('teal')].join(',');
+    const rows = [
+      {id:'bad1', kind:'groups', title:'שבור', data:[null, {id:'a'}, 5]},
+      {id:'bad2', kind:'topic', title:'צבע', color:'x" data-pwned="1', data:[
+        {id:'a',front:'1',back:'a'},{id:'b',front:'2',back:'b'},{id:'c',front:'3',back:'c'},
+        {id:'d" data-pwned="1',front:'4',back:'d'}]},
+      {id:'bad3', kind:'elements', title:'ריק', data:'not-an-array'},
+      {id:'bad4', kind:'iso', title:'בלי נתונים', data:null},
+      'לא אובייקט'
+    ];
+    let threw = null, built = [];
+    try{ built = buildDecks(rows); }catch(e){ threw = e.message; }
+    out.threw = threw;
+    out.built = built.map(function(d){ return d.id; }).join(',');
+    const saveRows = LIB.rows;
+    LIB.rows = rows; LIB.status = 'ok'; applyRows();
+    quiz = null; view = {name:'home'}; lastPaintError = null; renderNow();
+    out.home = !!document.querySelector('.deck-list');
+    view = {name:'browse', deck:'bad2', q:'', hide:false}; renderNow();
+    out.browse = document.querySelectorAll('.bcard').length;
+    startQuiz('bad2', 'f2b'); renderNow();
+    out.quiz = document.querySelectorAll('.opt').length;
+    out.pwned = document.querySelectorAll('[data-pwned]').length;
+    out.crash = lastPaintError;
+    quiz = null; view = {name:'home'};
+    LIB.rows = saveRows; applyRows(); renderNow();
+    return JSON.stringify(out);
+  })()`));
+  check(r.esc === '&quot;&#39;&lt;&gt;&amp;', 'esc לא מגן על ערך של מאפיין: ' + r.esc);
+  check(r.color === 'var(--c-o)', 'צבע עם גרשיים עבר: ' + r.color);
+  check(r.good === 'var(--c-n),#abc,teal', 'צבע תקין נפסל: ' + r.good);
+  check(r.threw === null, 'שורה פגומה הפילה את בניית הספרייה: ' + r.threw);
+  check(r.built === 'bad2', 'בניית הספרייה מהשורות הפגומות: ' + r.built);
+  check(r.home && !r.crash, 'מסך הבית לא עלה עם שורה פגומה: ' + r.crash);
+  check(r.browse === 4 && r.quiz === 4, `חבילה עם מזהה חשוד לא הוצגה (${r.browse}/${r.quiz})`);
+  check(r.pwned === 0, 'תוכן ציבורי הזריק מאפיין HTML');
+}
+
+/* 5z — תחזית העומס סופרת רק כרטיסים שבספרייה; מקלדת לא עונה ממסך הנעילה */
+{
+  const r = JSON.parse(win.eval(`(function(){
+    const total = function(){ return forecast(14).reduce(function(a, x){ return a + x.n; }, 0); };
+    const before = total();
+    CARDS['deleted-deck:x'] = {s:1, d:5, due:Date.now() - 1000, last:Date.now() - 2000, reps:1, lapses:0};
+    const after = total();
+    delete CARDS['deleted-deck:x'];
+
+    const save = AUTH, deck = DECKS.filter(function(d){ return !d.min; })[0] || DECKS[0];
+    startQuiz(deck.id, deck.modes[0].id);
+    const q = quiz.qs[0];
+    AUTH = null; renderNow();
+    document.dispatchEvent(new KeyboardEvent('keydown', {key:'1'}));
+    const out = {before:before, after:after, answered:!!q.answered, lock:!!document.querySelector('.lock')};
+    AUTH = save; quiz = null; view = {name:'home'}; renderNow();
+    return JSON.stringify(out);
+  })()`));
+  check(r.before === r.after, `כרטיס יתום נספר בתחזית (${r.before} → ${r.after})`);
+  check(r.lock && !r.answered, 'מקש מספר ענה על שאלה מאחורי מסך הנעילה');
 }
 
 /* 5q — צ'אט ההוספה: היסטוריה, צירוף קבצים, והדבקה מהלוח */
@@ -1137,8 +1595,11 @@ try {
   check(!put.some((u) => u.endsWith('missing.png')), 'ה-SW שמר בקאש תשובת שגיאה');
 }
 
+check(win.eval('lastPaintError') === null, 'מסך קרס במהלך הבדיקות: ' + win.eval('lastPaintError'));
+
 dom.window.close();
 
+reported = true;
 if (fail.length) {
   console.error('בדיקת העשן נכשלה:\n' + [...new Set(fail)].map((f) => '  · ' + f).join('\n'));
   process.exit(1);
