@@ -3847,47 +3847,64 @@ function renderErrors(){
 
 /* ===========================================================
    כפתור "אחורה" של המכשיר. המסכים מתחלפים בזיכרון, בלי היסטוריה,
-   ולכן אחורה יצא מהאפליקציה. כשיש לאן לחזור מחזיקים רשומת היסטוריה
-   אחת ("שומר"), ו-popstate מחזיר מסך אחד אחורה. במסך הבית אין שומר,
-   כך שאחורה שם יוצא כרגיל.
+   ולכן אחורה יצא מהאפליקציה. כל מסך עמוק מקבל רשומת היסטוריה משלו,
+   שנושאת את העומק שלו; אחורה מעלה את המסך עד העומק של הרשומה שאליה
+   חזרנו. במסך הבית אין רשומה, כך שאחורה שם יוצא כרגיל.
+
+   רשומות נוספות רק במעבר קדימה, שתמיד בא אחרי נגיעה. כרום מסמן רשומה
+   שנוספה בלי נגיעה מאז החזרה האחרונה כ"דלגי" ואחורה קופץ מעליה —
+   לכן popstate לעולם לא מוסיף רשומה.
    =========================================================== */
-function parentView(){
+function parentOf(q, v){
   const deckOr = function(id){ return deckById(id) ? {name:'deck', deck:id} : {name:'home'}; };
-  if(quiz) return deckOr(quiz.deck.id);
-  if(view.name === 'home') return null;
-  if(view.name === 'map') return deckOr(view.back);
-  if(view.name === 'browse') return deckOr(view.deck);
+  if(q) return deckOr(q.deck.id);
+  if(v.name === 'home') return null;
+  if(v.name === 'map') return deckOr(v.back);
+  if(v.name === 'browse') return deckOr(v.deck);
   return {name:'home'};
 }
-function canGoBack(){
-  if(document.querySelector('.sheet-bg')) return true;
-  if(authEnabled && !AUTH) return false;
-  return !!parentView();
+function depthOf(){
+  if(authEnabled && !AUTH) return 0;
+  let d = document.querySelectorAll('.sheet-bg').length, q = quiz, v = view, p;
+  while((p = parentOf(q, v))){ d++; q = null; v = p; }
+  return d;
 }
-function goBack(){
+function stepUp(){
   const sheets = document.querySelectorAll('.sheet-bg');
-  if(sheets.length){ sheets[sheets.length-1].remove(); syncHistory(); return; }
-  if(authEnabled && !AUTH) return;
-  const p = parentView();
-  if(!p) return;
+  if(sheets.length){ sheets[sheets.length-1].remove(); return true; }
+  if(authEnabled && !AUTH) return false;
+  const p = parentOf(quiz, view);
+  if(!p) return false;
   quiz = null; view = p;
-  syncHistory();          /* מיד, ולא בפריים הבא — כדי ששתי לחיצות מהירות לא יצאו */
-  render();
+  return true;
 }
+function goBack(){ if(stepUp()){ syncHistory(); render(); } }
+
 let histBusy = false;     /* history.back() שלנו בדרך — ה-popstate שלו אינו לחיצה */
-function guarded(){ return !!(history.state && history.state.shinun); }
+function histEntry(){
+  const s = history.state && history.state.shinun;
+  if(!s) return null;
+  return typeof s === 'object' ? s : {d:1, n:1};     /* {shinun:1} מהגרסה הקודמת */
+}
 function syncHistory(){
   if(histBusy) return;
-  const deep = canGoBack();
-  if(deep && !guarded()) history.pushState({shinun:1}, '');
-  else if(!deep && guarded()){ histBusy = true; history.back(); }
+  const want = depthOf(), e = histEntry(), have = e ? e.d : 0;
+  if(want > have) history.pushState({shinun:{d:want, n:(e ? e.n : 0) + 1}}, '');
+  else if(want < have){ histBusy = true; history.back(); }
 }
 window.addEventListener('popstate', function(){
   if(histBusy){ histBusy = false; syncHistory(); return; }
-  goBack();
+  const e = histEntry(), have = e ? e.d : 0;
+  let moved = false;
+  while(depthOf() > have && stepUp()) moved = true;
+  syncHistory();          /* רק מסיר עודפים (למשל אחרי "קדימה"); לא מוסיף */
+  if(moved) render();
 });
 /* גיליונות נפתחים ונסגרים ישירות ב-body, בלי render */
 new MutationObserver(syncHistory).observe(document.body, {childList:true});
+/* טעינה מחדש במסך עמוק (למשל עדכון גרסה) מתחילה בבית, על רשומה עמוקה
+   של המסמך הקודם. חוזרים לרשומת הבסיס כדי שאחורה מהבית יצא. */
+if(histEntry()){ histBusy = true; history.go(-histEntry().n); }
 
 /* 48 מקומות בקוד קוראים ל-render, וכל תשובה אסינכרונית ציירה בעצמה.
    מכאן "מופיע לשנייה ונעלם". עכשיו כל הקריאות מתאחדות לציור אחד
