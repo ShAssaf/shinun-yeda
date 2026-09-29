@@ -1,0 +1,33 @@
+name: keep supabase awake
+
+# פרויקט Supabase בתוכנית החינמית מושהה אחרי כשבוע בלי פעילות, ואז
+# ההתחברות, טעינת הנושאים והסנכרון נופלים יחד. שאילתה קטנה פעם ביום
+# שומרת אותו ער גם כשלא מתרגלים.
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: שאילתה למסד
+        run: |
+          url=$(jq -r .supabaseUrl data/config.json)
+          key=$(jq -r .supabaseKey data/config.json)
+          # לאורח RLS מסנן את כל השורות, אבל השאילתה עדיין רצה על Postgres —
+          # וזה מה שנספר כפעילות
+          code=$(curl -sS -o body.txt -w '%{http_code}' --retry 3 --retry-delay 10 \
+            "$url/rest/v1/decks?select=id&limit=1" -H "apikey: $key") || true
+          echo "HTTP $code: $(head -c 300 body.txt 2>/dev/null)"
+          # ריצה אדומה = מייל מ-GitHub, והסימן לבדוק אם הפרויקט כבר הושהה
+          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
+            echo "::error::Supabase לא ענה כראוי (HTTP $code). ייתכן שהפרויקט מושהה — שחזר אותו מלוח הבקרה."
+            exit 1
+          fi

@@ -79,6 +79,10 @@ export ANDROID_SDK_ROOT="$ANDROID_HOME"
 הכתיבה עוברת דרך תור ב-`localStorage`, כך שתרגול בלי רשת לא אובד.
 המיזוג בין מכשירים לפי `last_review` המאוחר יותר.
 
+פרויקט Supabase חינמי מושהה אחרי כשבוע בלי פעילות. `.github/workflows/keep-alive.yml`
+שולח שאילתה קטנה פעם ביום כדי למנוע זאת; ריצה אדומה שם פירושה שהפרויקט
+כנראה כבר מושהה, ויש לשחזר אותו מלוח הבקרה של Supabase.
+
 ## הוספת חבילה חדשה
 
 הכול ב-`functional-groups.html`:
