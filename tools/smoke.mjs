@@ -4,6 +4,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import vm from 'node:vm';
 import { JSDOM, VirtualConsole } from 'jsdom';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -13,7 +14,10 @@ const fail = [];
 const html = await readFile(join(ROOT, 'www', 'index.html'), 'utf8');
 
 const vc = new VirtualConsole();
-vc.on('jsdomError', (e) => fail.push('שגיאת JS בטעינה: ' + e.message));
+/* סגירת חלון מפרקת את ה-body, ומשקיף ההיסטוריה של האפליקציה רץ על מסמך
+   שכבר איננו. זה רעש של פירוק הבדיקה, לא תקלה — בדפדפן הדף לא נסגר מתחתיה. */
+let tearingDown = false;
+vc.on('jsdomError', (e) => { if (!tearingDown) fail.push('שגיאת JS בטעינה: ' + e.message); });
 
 const dom = new JSDOM(html, {
   runScripts: 'dangerously',
@@ -703,8 +707,33 @@ try {
   check(order.seen.join(',') === 'work,sync', 'סדר הפעולות: ' + order.seen.join(','));
   check(order.out === 'done', 'mutate לא מחזיר את תוצאת הפעולה');
 
-  check(win.eval('syncLibrary.toString()').indexOf('if(syncing) return syncing') > -1,
-    'סנכרונים מקבילים לא מתאחדים');
+  /* סנכרון שרץ התחיל לפני השינוי — מי שמבקש בזמנו מקבל סבב אחד נוסף
+     אחריו, משותף לכולם, ולא את התשובה הישנה */
+  const queue = JSON.parse(await win.eval(`(function(){
+    const realLoad = loadLibrary;
+    const seen = [];
+    let n = 0, release;
+    loadLibrary = function(){
+      const id = ++n;
+      seen.push('start' + id);
+      if(id === 1) return new Promise(function(r){ release = r; })
+        .then(function(){ seen.push('end1'); return {ok:true, data:LIB.rows}; });
+      seen.push('end' + id);
+      return Promise.resolve({ok:true, data:LIB.rows});
+    };
+    syncing = null; syncQueued = null;
+    const first = syncLibrary();
+    const a = syncLibrary(), b = syncLibrary();
+    release();
+    return Promise.all([first, a, b]).then(function(){
+      loadLibrary = realLoad;
+      return JSON.stringify({seen:seen, same:a === b, idle:syncing === null && syncQueued === null});
+    });
+  })()`));
+  check(queue.seen.join(',') === 'start1,end1,start2,end2',
+    'סנכרון בזמן ריצה: ' + queue.seen.join(','));
+  check(queue.same, 'בקשות בזמן ריצה לא מתאחדות לסבב אחד');
+  check(queue.idle, 'הסנכרון לא השתחרר בסוף');
 }
 
 /* 5p — הגדרות המשתמש נשמרות בשרת, לא רק בדפדפן */
@@ -960,6 +989,57 @@ const ACT_FIXTURES = `
   check(r.browse === '4,מיון', 'העיון לא מציג תרגילים: ' + r.browse);
 }
 
+/* 5r — כפתור אחורה של המכשיר חוזר מסך אחד, ויוצא רק ממסך הבית */
+try {
+  /* בלי רשומה לחזור אליה אין popstate — לא ממתינים לנצח */
+  const popped = () => new Promise((r) => {
+    win.addEventListener('popstate', () => setTimeout(r, 0), { once: true });
+    setTimeout(r, 300);
+  });
+  const settle = () => new Promise((r) => setTimeout(r, 30));
+  const at = () => JSON.parse(win.eval(`JSON.stringify({
+    name: quiz ? 'quiz' : view.name, deck: view.deck || null,
+    guard: !!(history.state && history.state.shinun), len: history.length,
+    sheet: !!document.querySelector('.sheet-bg') })`));
+
+  /* בדיקות קודמות ריקנו את הספרייה */
+  win.eval(`LIB.status='ok'; LIB.rows=localRows(); applyRows(); quiz=null; view={name:'home'}; renderNow();`);
+  await settle();
+  const base = at();
+  check(!base.guard, 'במסך הבית נשארה רשומת היסטוריה — אחורה לא יצא');
+
+  const first = win.eval('DECKS[0].id'), id = JSON.stringify(first);
+  win.eval(`view={name:'deck', deck:${id}}; renderNow();`);
+  check(at().guard, 'מעבר לחבילה לא הוסיף רשומת היסטוריה');
+  win.eval(`view={name:'browse', deck:${id}, q:'', hide:false}; renderNow();`);
+  check(at().len <= 2, 'כל מסך הוסיף רשומה משלו במקום שומר אחד');
+
+  let p = popped(); win.history.back(); await p;
+  let s = at();
+  check(s.name === 'deck' && s.deck === first, `אחורה מעיון הגיע ל-${s.name} במקום לחבילה`);
+  check(s.guard, 'אחרי חזרה לחבילה אין שומר — הלחיצה הבאה תצא');
+
+  p = popped(); win.history.back(); await p;
+  s = at();
+  check(s.name === 'home' && !s.guard, `אחורה מחבילה הגיע ל-${s.name} במקום לבית`);
+
+  /* סבב כללי: כפתור הבית בחידון שלח לחבילה 'all' שאינה קיימת, ונפל */
+  win.eval(`startMixed(); renderNow(); document.getElementById('homeBtn').click();`);
+  await settle();
+  s = at();
+  check(s.name === 'home' && !s.guard, `יציאה מסבב כללי הגיעה ל-${s.name}`);
+
+  win.eval(`openExamSheet();`);
+  await settle();
+  check(at().guard, 'גיליון פתוח לא הוסיף רשומת היסטוריה');
+  p = popped(); win.history.back(); await p;
+  s = at();
+  check(!s.sheet && s.name === 'home', 'אחורה לא סגר את הגיליון');
+  check(s.len <= 2, `ההיסטוריה גדלה ל-${s.len} אחרי סבב שלם`);
+} catch (e) {
+  fail.push('כפתור אחורה נפל: ' + e.message);
+}
+
 /* 6 — בלי מפגש שמור, מסך הנעילה מופיע ושום דבר אחר לא */
 {
   const locked = new JSDOM(html, {
@@ -981,7 +1061,49 @@ const ACT_FIXTURES = `
     check(!!d.querySelector('#lockGoogle'), 'אין כפתור התחברות עם גוגל');
     check(!d.querySelector('.deck-list'), 'התוכן דלף אל מסך הנעילה');
   }
+  tearingDown = true;
   locked.window.close();
+  await new Promise((r) => setTimeout(r, 0));
+  tearingDown = false;
+}
+
+/* ה-SW מטפל רק בקבצי האפליקציה. קריאה ל-Supabase שעברה בו נשמרה
+   בקאש-תחילה, וכרטיסים חדשים לא הופיעו עד איפוס ידני. */
+{
+  const handlers = {};
+  const put = [];
+  const sandbox = {
+    self: {
+      location: new URL('https://shassaf.github.io/shinun-yeda/sw.js'),
+      addEventListener: (type, fn) => { handlers[type] = fn; },
+    },
+    caches: {
+      match: () => Promise.resolve(undefined),
+      open: () => Promise.resolve({ put: (req) => { put.push(req.url); } }),
+    },
+    fetch: (req) => Promise.resolve({ ok: req.url.indexOf('missing') < 0, clone() { return this; } }),
+    URL,
+  };
+  vm.runInNewContext(await readFile(join(ROOT, 'www', 'sw.js'), 'utf8'), sandbox);
+
+  const fire = (url) => {
+    let answer = null;
+    handlers.fetch({
+      request: { url, method: 'GET', mode: 'cors' },
+      respondWith: (p) => { answer = p; },
+    });
+    return answer;
+  };
+
+  check(fire('https://x.supabase.co/rest/v1/decks?select=id') === null,
+    'ה-SW יירט קריאה ל-Supabase');
+  const own = fire('https://shassaf.github.io/shinun-yeda/icons/icon-192.png');
+  check(own !== null, 'ה-SW לא מטפל בקבצי האפליקציה');
+  await own;
+  await fire('https://shassaf.github.io/shinun-yeda/icons/missing.png');
+  await new Promise((r) => setTimeout(r, 0));
+  check(put.some((u) => u.endsWith('icon-192.png')), 'ה-SW לא שמר קובץ תקין בקאש');
+  check(!put.some((u) => u.endsWith('missing.png')), 'ה-SW שמר בקאש תשובת שגיאה');
 }
 
 dom.window.close();

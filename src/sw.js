@@ -43,6 +43,11 @@ self.addEventListener('fetch', (e) => {
   if (request.method !== 'GET') return;
 
   const url = new URL(request.url);
+  /* רק קבצי האפליקציה עצמה. קריאות ל-Supabase הן נתונים חיים: כשעברו
+     כאן, תשובת הספרייה הראשונה נשמרה בקאש-תחילה והוגשה לנצח, וכרטיסים
+     חדשים לא הופיעו עד איפוס ידני. לאופליין יש לספרייה מראה משלה. */
+  if (url.origin !== self.location.origin) return;
+
   const fresh = request.mode === 'navigate' || FRESH.test(url.pathname);
 
   if (fresh) {
@@ -50,8 +55,10 @@ self.addEventListener('fetch', (e) => {
     e.respondWith(
       fetch(request)
         .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(request, copy)).catch(() => {});
+          if (res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put(request, copy)).catch(() => {});
+          }
           return res;
         })
         .catch(() => caches.match(request).then((hit) => hit || caches.match('./index.html'))),
@@ -64,8 +71,10 @@ self.addEventListener('fetch', (e) => {
     caches.match(request).then((hit) => {
       if (hit) return hit;
       return fetch(request).then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(request, copy)).catch(() => {});
+        if (res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(request, copy)).catch(() => {});
+        }
         return res;
       });
     }),

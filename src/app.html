@@ -1825,10 +1825,22 @@ function importStarter(){
    ואם גם הוא ריק — מהתוכן המוטמע, כדי שהאפליקציה לא תהיה ריקה. */
 /* כל פעולה שמשנה תוכן מסתיימת בסנכרון. בלי זה כל שינוי דורש
    מהמשתמש לרענן ידנית, וזה בדיוק מה שלא אמור לקרות. */
-let syncing = null;
+/* סנכרון שכבר רץ התחיל לפני השינוי, ותשובתו עלולה לא לכלול אותו.
+   לכן קריאה בזמן ריצה לא מצטרפת אליו אלא נרשמת לסבב נוסף אחריו —
+   אחד בלבד, שמשרת את כל מי שביקש בינתיים. */
+let syncing = null, syncQueued = null;
 function syncLibrary(){
-  if(syncing) return syncing;
-  syncing = loadLibrary().then(function(res){ syncing = null; return res; });
+  if(syncing){
+    if(!syncQueued){
+      const next = function(){ syncQueued = null; return syncLibrary(); };
+      syncQueued = syncing.then(next, next);
+    }
+    return syncQueued;
+  }
+  const done = function(){ syncing = null; };
+  syncing = loadLibrary().then(
+    function(res){ done(); return res; },
+    function(err){ done(); throw err; });
   return syncing;
 }
 
@@ -2608,11 +2620,7 @@ function renderQuiz(){
     opts + '<div class="fb-wrap">' + fb + '</div>' +
   '</div>';
 
-  /* לסבב המאוחד אין מסך חבילה — חוזרים הביתה */
-  app.querySelector('#homeBtn').addEventListener('click', function(){
-    view = quiz.deck.id==='all' ? {name:'home'} : {name:'deck',deck:quiz.deck.id};
-    quiz=null; render();
-  });
+  app.querySelector('#homeBtn').addEventListener('click', goBack);
   Array.prototype.forEach.call(app.querySelectorAll('.opt'), function(btn){
     btn.addEventListener('click', function(){ answer(btn.dataset.id); });
   });
@@ -3837,6 +3845,50 @@ function renderErrors(){
   });
 }
 
+/* ===========================================================
+   כפתור "אחורה" של המכשיר. המסכים מתחלפים בזיכרון, בלי היסטוריה,
+   ולכן אחורה יצא מהאפליקציה. כשיש לאן לחזור מחזיקים רשומת היסטוריה
+   אחת ("שומר"), ו-popstate מחזיר מסך אחד אחורה. במסך הבית אין שומר,
+   כך שאחורה שם יוצא כרגיל.
+   =========================================================== */
+function parentView(){
+  const deckOr = function(id){ return deckById(id) ? {name:'deck', deck:id} : {name:'home'}; };
+  if(quiz) return deckOr(quiz.deck.id);
+  if(view.name === 'home') return null;
+  if(view.name === 'map') return deckOr(view.back);
+  if(view.name === 'browse') return deckOr(view.deck);
+  return {name:'home'};
+}
+function canGoBack(){
+  if(document.querySelector('.sheet-bg')) return true;
+  if(authEnabled && !AUTH) return false;
+  return !!parentView();
+}
+function goBack(){
+  const sheets = document.querySelectorAll('.sheet-bg');
+  if(sheets.length){ sheets[sheets.length-1].remove(); syncHistory(); return; }
+  if(authEnabled && !AUTH) return;
+  const p = parentView();
+  if(!p) return;
+  quiz = null; view = p;
+  syncHistory();          /* מיד, ולא בפריים הבא — כדי ששתי לחיצות מהירות לא יצאו */
+  render();
+}
+let histBusy = false;     /* history.back() שלנו בדרך — ה-popstate שלו אינו לחיצה */
+function guarded(){ return !!(history.state && history.state.shinun); }
+function syncHistory(){
+  if(histBusy) return;
+  const deep = canGoBack();
+  if(deep && !guarded()) history.pushState({shinun:1}, '');
+  else if(!deep && guarded()){ histBusy = true; history.back(); }
+}
+window.addEventListener('popstate', function(){
+  if(histBusy){ histBusy = false; syncHistory(); return; }
+  goBack();
+});
+/* גיליונות נפתחים ונסגרים ישירות ב-body, בלי render */
+new MutationObserver(syncHistory).observe(document.body, {childList:true});
+
 /* 48 מקומות בקוד קוראים ל-render, וכל תשובה אסינכרונית ציירה בעצמה.
    מכאן "מופיע לשנייה ונעלם". עכשיו כל הקריאות מתאחדות לציור אחד
    בפריים הבא, כך שאין מצב ביניים שמוצג. */
@@ -3854,6 +3906,7 @@ function renderNow(){ renderPending = false; paint(); }
    ברקע, שיבוץ בתרגיל — משאיר את המשתמש איפה שהיה. */
 let paintedAt = null;
 function paint(){
+  syncHistory();
   if(authEnabled && !AUTH){ renderLock(); window.scrollTo(0,0); paintedAt = 'lock'; return; }
   if(quiz && quiz.done) renderResults();
   else if(quiz) renderQuiz();
