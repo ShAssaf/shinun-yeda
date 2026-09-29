@@ -71,9 +71,12 @@ await writeFile(join(ROOT, 'www', 'index.html'), pwa, 'utf8');
 
 /* ---- www/sw.js ---- */
 /* חותמים את ה-SW בטביעת אצבע של הדף, כך שכל דיפלוי מתקין אותו מחדש
-   ומפנה את הקאש הישן. בלי זה הגרסה הראשונה שנתפסה נשארת לנצח. */
-const stamp = createHash('sha256').update(pwa).digest('hex').slice(0, 12);
-const sw = (await readFile(join(ROOT, 'src', 'sw.js'), 'utf8')).replace('__BUILD__', stamp);
+   ומפנה את הקאש הישן. בלי זה הגרסה הראשונה שנתפסה נשארת לנצח.
+   גם קוד ה-SW נכנס לטביעה: שינוי בו בלבד חייב שם קאש חדש, אחרת
+   הקאש הישן שורד את ההתקנה. */
+const swSrc = await readFile(join(ROOT, 'src', 'sw.js'), 'utf8');
+const stamp = createHash('sha256').update(pwa).update(swSrc).digest('hex').slice(0, 12);
+const sw = swSrc.replace('__BUILD__', stamp);
 if (sw.includes('__BUILD__')) throw new Error('לא הוחלף מציין הגרסה ב-sw.js');
 await writeFile(join(ROOT, 'www', 'sw.js'), sw, 'utf8');
 
