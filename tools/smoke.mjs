@@ -317,10 +317,15 @@ try {
     LIB.status='ok'; LIB.reason=null; LIB.rows=[]; applyRows(); renderNow();
     out.empty = {decks:DECKS.length, shows:app.innerHTML.indexOf('אין עדיין נושאים') > -1};
 
-    LIB.status='cached'; LIB.rows=snap; applyRows(); renderNow();
-    out.cached = {decks:DECKS.length, warns:app.innerHTML.indexOf('מוצג מהמטמון המקומי') > -1};
+    /* מצב הפתיחה: מטמון, ועוד לא פנינו לשרת — אין על מה להזהיר */
+    LIB.status='cached'; LIB.reason=null; LIB.rows=snap; applyRows(); renderNow();
+    out.boot = {decks:DECKS.length, warns:app.innerHTML.indexOf('מוצג מהמטמון המקומי') > -1};
 
-    LIB.status='ok'; applyRows(); renderNow();
+    LIB.status='cached'; LIB.reason='HTTP 503'; applyRows(); renderNow();
+    out.cached = {decks:DECKS.length, warns:app.innerHTML.indexOf('מוצג מהמטמון המקומי') > -1,
+                  reason:app.innerHTML.indexOf('HTTP 503') > -1};
+
+    LIB.status='ok'; LIB.reason=null; applyRows(); renderNow();
     return JSON.stringify(out);
   })()`));
   check(states.unknown.decks === 0 && states.unknown.html, 'מצב unknown לא מציג טעינה');
@@ -329,6 +334,8 @@ try {
   check(states.empty.decks === 0 && states.empty.shows, 'ספרייה ריקה מהשרת לא מציגה מצב ריק');
   check(states.cached.decks > 0, 'מטמון לא מוצג');
   check(states.cached.warns, 'הצגת מטמון ישן לא מסומנת למשתמש');
+  check(states.cached.reason, 'אזהרת המטמון לא מציגה את הסיבה');
+  check(states.boot.decks > 0 && !states.boot.warns, 'אזהרת המטמון מופיעה בפתיחה לפני שנוסה השרת');
 }
 
 /* 5c2 — משיכת ספרייה לא מוחקת את המראה כשהיא לא מצליחה לענות */
