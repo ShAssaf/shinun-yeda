@@ -1231,6 +1231,233 @@ try {
   check(r.lock && !r.answered, 'מקש מספר ענה על שאלה מאחורי מסך הנעילה');
 }
 
+/* 5aa — מפתחות ישנים: לא נשלחים לפני שהספרייה אומתה, ושורה ישנה בשרת
+   לא גורמת לשליחה חוזרת וציור מחדש בכל סנכרון */
+{
+  const r = JSON.parse(await win.eval(`(function(){
+    __quiet();
+    const save = {AUTH:AUTH, UID:UID, CARDS:CARDS, DIRTY:DIRTY, LOGQ:LOGQ, rows:LIB.rows, status:LIB.status};
+    AUTH = __session('uL'); UID = 'uL';
+    const r0 = localRows()[0], nid = '22222222-bbbb-4bbb-8bbb-222222222222';
+    const item = r0.data[0].id, oldKey = r0.id + ':' + item, newKey = nid + ':' + item;
+    const T = Date.now();
+    CARDS = {}; CARDS[oldKey] = {s:4, d:5, due:T+1e8, last:T-5000, reps:2, lapses:0};
+    DIRTY = {}; DIRTY[oldKey] = 1; LOGQ = [];
+    LIB.status = 'cached'; LIB.rows = []; LEGACY_READY = false; refreshLegacyMap();
+    const out = {};
+    let m = __mock(function(){ return {status:201, text:''}; });
+    return syncCards(false).then(function(){
+      m.restore();
+      out.heldBeforeLibrary = m.sent.filter(function(x){ return x.url.indexOf('card_state') > -1; }).length === 0;
+      LIB.status = 'ok';
+      LIB.rows = [{id:nid, owner_id:'uL', kind:r0.kind, title:r0.title, data:r0.data, visibility:'private'}];
+      remapLegacyKeys();
+      /* בשרת: גם שורה ישנה תחת המפתח הישן וגם המפתח החדש, באותו מצב —
+         בסדר של order=card_key, כמו ש-PostgREST מחזיר (ספרות לפני אותיות) */
+      const st = CARDS[newKey];
+      const row = function(k){ return {card_key:k, stability:st.s, difficulty:st.d, due:new Date(st.due).toISOString(),
+                                       last_review:new Date(st.last).toISOString(), reps:st.reps, lapses:st.lapses}; };
+      const server = [row(oldKey), row(newKey)].sort(function(a, b){ return a.card_key < b.card_key ? -1 : 1; });
+      DIRTY = {};
+      let posts = 0;
+      const once = function(){
+        __quiet();
+        m = __mock(function(req){
+          if(req.method === 'GET') return {status:200, body:req.url.indexOf('offset=0') > -1 ? server : []};
+          posts++; return {status:201, text:''};
+        });
+        return syncCards(true).then(function(){ m.restore(); });
+      };
+      return once().then(once).then(once).then(function(){
+        out.noChurn = posts === 0 && Object.keys(DIRTY).length === 0;
+        ['shinun-cards:uL','shinun-dirty:uL','shinun-log:uL'].forEach(function(k){ localStorage.removeItem(k); });
+        AUTH = save.AUTH; UID = save.UID; CARDS = save.CARDS; DIRTY = save.DIRTY; LOGQ = save.LOGQ;
+        LIB.rows = save.rows; LIB.status = save.status; refreshLegacyMap();
+        return JSON.stringify(out);
+      });
+    });
+  })()`));
+  check(r.heldBeforeLibrary, 'מפתח ישן נשלח לפני שהספרייה אומתה — ייווצרו שתי שורות לאותו כרטיס');
+  check(r.noChurn, 'שורה ישנה בשרת גורמת לשליחה חוזרת בכל סנכרון');
+}
+
+/* 5ab — מטמון ישן של משתמש אחר לא מאומץ; הגדרות בלי תאריך לא מוחקות תאריך */
+{
+  const r = JSON.parse(win.eval(`(function(){
+    const save = {AUTH:AUTH, UID:UID};
+    localStorage.setItem('shinun-cards', JSON.stringify({'fg:x': {s:1, d:5, due:Date.now(), last:Date.now(), reps:1, lapses:0}}));
+    localStorage.setItem('shinun-rows', JSON.stringify([{id:'pa', owner_id:'uA', visibility:'private', kind:'topic', title:'של A', data:[]}]));
+    UID = null; AUTH = __session('uB'); bindUser('uB');
+    const out = {
+      notAdopted: !CARDS['fg:x'] && localStorage.getItem('shinun-cards:uB') === null,
+      legacyKept: localStorage.getItem('shinun-cards') !== null
+    };
+    ['shinun-cards','shinun-rows'].forEach(function(k){ localStorage.removeItem(k); });
+    storageKeys().filter(function(k){ return /:uB$/.test(k); }).forEach(jremove);
+    /* תאריך מהגרסה הקודמת: חדש מ"אין תאריך", ישן מכל שינוי אמיתי */
+    localStorage.setItem('bio-quiz-v2', JSON.stringify({rounds:2, examDate:'2027-01-01'}));
+    UID = null; AUTH = __session('uC'); bindUser('uC');
+    out.legacyExamAt = store.examAt === 1 && store.dirty === true;
+    storageKeys().filter(function(k){ return /:uC$/.test(k); }).forEach(jremove);
+    AUTH = save.AUTH; bindUser(save.UID);
+    LIB.status = 'ok'; LIB.rows = localRows(); applyRows(); quiz = null; view = {name:'home'}; renderNow();
+    return JSON.stringify(out);
+  })()`));
+  check(r.notAdopted && r.legacyKept, 'היסטוריה של משתמש אחר אומצה לחשבון של מי שנכנס אחריו');
+  check(r.legacyExamAt, 'תאריך מבחן מהגרסה הקודמת נשלח עם זמן 1970 ויימחק על ידי מכשיר אחר');
+
+  const set = JSON.parse(await win.eval(`(function(){
+    const realRest = rest, save = {AUTH:AUTH, UID:UID, store:store};
+    AUTH = __session('uD'); UID = 'uD'; store = defaultSettings(); store.rounds = 3; store.dirty = true;
+    const bodies = [];
+    rest = function(path, init){ bodies.push(JSON.parse(init.body)); return Promise.resolve({ok:true}); };
+    pushingSettings = null; settingsAgain = false;
+    return pushSettings().then(function(){
+      rest = realRest;
+      const out = {hasExam: 'exam_date' in bodies[0]};
+      store = defaultSettings();
+      const m = __mock(function(){ return {status:200, body:[{exam_date:'2027-05-05', rounds:1, updated_at:new Date(0).toISOString()}]}; });
+      return pullSettings().then(function(){
+        m.restore();
+        out.learned = store.examDate === '2027-05-05';
+        localStorage.removeItem('bio-quiz-v2:uD');
+        AUTH = save.AUTH; UID = save.UID; store = save.store;
+        return JSON.stringify(out);
+      });
+    });
+  })()`));
+  check(!set.hasExam, 'מכשיר שלא ידע תאריך שלח exam_date ריק — ימחק את התאריך בשרת');
+  check(set.learned, 'מכשיר חדש לא קיבל את תאריך המבחן מהשרת');
+}
+
+/* 5ac — שתי לשוניות מרעננות יחד: השנייה מאמצת, ולא מבטלת את המפגש המשותף */
+{
+  const r = JSON.parse(await win.eval(`(function(){
+    const save = AUTH, realFetch = fetch;
+    const exp = Math.floor(Date.now()/1000) - 10, good = Math.floor(Date.now()/1000) + 3600;
+    AUTH = {access:'h.' + btoa(JSON.stringify({exp:exp, sub:'uR2'})) + '.s', refresh:'rt0', uid:'uR2'};
+    SESSION.refreshing = null;
+    const calls = [];
+    fetch = function(url){
+      calls.push(String(url));
+      if(String(url).indexOf('grant_type=refresh_token') > -1){
+        /* בזמן הבקשה לשונית אחרת כבר סובבה, והאירוע שלה אומץ */
+        AUTH = Object.assign({}, AUTH, {access:'h.' + btoa(JSON.stringify({exp:good, sub:'uR2'})) + '.s', refresh:'rt1-other'});
+        return Promise.resolve({ok:true, json:function(){
+          return Promise.resolve({access_token:'h.' + btoa(JSON.stringify({exp:good, sub:'uR2'})) + '.s', refresh_token:'rt1-mine'});
+        }});
+      }
+      return Promise.resolve({ok:true, json:function(){ return Promise.resolve({}); }});
+    };
+    return doRefresh().then(function(res){
+      fetch = realFetch;
+      const out = {res:res, revoked:calls.some(function(u){ return u.indexOf('/logout') > -1; }),
+                   kept:AUTH && AUTH.refresh};
+      AUTH = save;
+      return JSON.stringify(out);
+    });
+  })()`));
+  check(r.res === 'ok', 'רענון שלשונית אחרת כבר ביצעה לא נחשב הצלחה: ' + r.res);
+  check(!r.revoked, 'רענון כפול ביטל את המפגש המשותף — כל הלשוניות יתנתקו');
+  check(r.kept === 'rt1-other', 'הטוקן שאומץ מהלשונית האחרת נדרס');
+}
+
+/* 5ad — חזרה מגוגל: בלי חותמת מקומית נדחית עם הסבר; החותמת נצרכת גם בחזרה בלי טוקנים */
+{
+  const load = async (hash, stamp) => {
+    const w = new JSDOM(html, {
+      runScripts: 'dangerously', pretendToBeVisual: true, virtualConsole: vc,
+      url: 'https://shassaf.github.io/shinun-yeda/' + hash,
+      beforeParse(x) {
+        x.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+        x.scrollTo = () => {};
+        x.fetch = () => Promise.reject(new Error('אין רשת בבדיקה'));
+        if (stamp) x.localStorage.setItem('shinun-signin', JSON.stringify({ t: Date.now() }));
+      },
+    });
+    await new Promise((res) => w.window.addEventListener('load', res, { once: true }));
+    const out = JSON.parse(w.window.eval(`JSON.stringify({
+      auth: !!AUTH, uid: AUTH && AUTH.uid, err: view.lockErr || null,
+      stamp: localStorage.getItem('shinun-signin') !== null, hash: location.hash })`));
+    tearingDown = true; w.window.close(); await new Promise((res) => setTimeout(res, 0)); tearingDown = false;
+    return out;
+  };
+  const good = Math.floor(Date.now() / 1000) + 3600;
+  const tok = 'h.' + Buffer.from(JSON.stringify({ exp: good, sub: 'u-oauth', email: 'o@t' })).toString('base64') + '.s';
+  const noStamp = await load('#access_token=' + tok + '&refresh_token=r', false);
+  check(!noStamp.auth && !!noStamp.err, 'טוקנים בלי חותמת התקבלו, או נדחו בלי הסבר');
+  check(noStamp.hash === '', 'הטוקנים נשארו בכתובת');
+  const ok = await load('#access_token=' + tok + '&refresh_token=r', true);
+  check(ok.auth && ok.uid === 'u-oauth' && !ok.stamp, 'התחברות תקינה נדחתה, או שהחותמת לא נצרכה');
+  const cancelled = await load('#error=access_denied&error_description=cancelled', true);
+  check(!cancelled.auth && !cancelled.stamp && !!cancelled.err, 'ביטול ההתחברות השאיר חותמת פתוחה או בלי הודעה');
+}
+
+/* 5ae — ניהול: אישור לגרסה שנראתה; "לא נמצא" אינו "חסרה מיגרציה"; נושא שממתין לאישור
+   חוזר עדיין ניתן להסרה אצל המנוי; חזרה "מוקדמת" לא נחשבת ישנה */
+{
+  const r = JSON.parse(await win.eval(`(function(){
+    const save = {AUTH:AUTH, UID:UID, sl:syncLibrary, fs:fetchStore, fr:fetchReviewStatus, subs:LIB.subs, rows:LIB.rows};
+    AUTH = Object.assign(__session('uAd'), {admin:true}); UID = 'uAd';
+    const out = {};
+    let m = __mock(function(req){
+      if(req.url.indexOf('admin_review_deck') > -1) return {status:404, text:'{"code":"PT404","message":"החבילה לא נמצאה"}'};
+      return {status:200, body:[]};
+    });
+    return rpcJson('admin_review_deck', {p_deck:'x', p_verdict:'approved', p_note:null, p_seen:'2026-01-01T00:00:00+00:00'})
+      .then(function(){ out.pt404 = 'resolved'; }, function(e){ out.pt404 = e.message; })
+      .then(function(){
+        m.restore();
+        /* לחיצה על "אשר" שולחת את הגרסה שהוצגה */
+        view = {name:'admin', tab:'queue', loading:false, loaded:true, decks:[
+          {id:'q1', title:'ממתין', review_status:'pending', visibility:'public', owner_email:'a@b', item_count:4,
+           updated_at:'2026-09-01T10:00:00.123456+00:00'}]};
+        renderNow();
+        m = __mock(function(req){
+          return req.url.indexOf('admin_review_deck') > -1 ? {status:200, body:'approved'} : {status:200, body:[]};
+        });
+        document.querySelector('[data-approve]').click();
+        return new Promise(function(res){ setTimeout(res, 30); });
+      }).then(function(){
+        const call = m.sent.filter(function(x){ return x.url.indexOf('admin_review_deck') > -1; })[0];
+        out.seen = call ? call.body.p_seen : null;
+        m.restore();
+        /* מנוי לנושא שממתין לאישור חוזר */
+        LIB.subs = ['p9'];
+        LIB.rows = [{id:'p9', owner_id:'o', kind:'topic', title:'נערך', visibility:'public', item_count:4, data:[]}];
+        syncLibrary = function(){ return Promise.resolve({ok:true}); };
+        fetchStore = function(){ return Promise.resolve({ok:true, data:[]}); };
+        fetchReviewStatus = function(){ return Promise.resolve({}); };
+        openStore();
+        return new Promise(function(res){ setTimeout(res, 30); });
+      }).then(function(){
+        renderNow();
+        const b = document.querySelector('[data-sub="p9"]');
+        out.unsub = b ? b.textContent.trim() : '';
+        syncLibrary = save.sl; fetchStore = save.fs; fetchReviewStatus = save.fr;
+        LIB.subs = save.subs; LIB.status = 'ok'; LIB.rows = localRows(); applyRows();
+        storageKeys().filter(function(k){ return /:uAd$/.test(k); }).forEach(jremove);
+        /* חזרה אחרי מצב שנחתם בשעון שמקדים */
+        const deck = DECKS[0], it = deck.items[0], key = deck.keyFn(it);
+        const was = CARDS[key];
+        CARDS[key] = {s:3, d:5, due:Date.now() + 1e8, last:Date.now() + 300000, reps:2, lapses:0};
+        const q = {key:key};
+        __quiet();
+        scheduleReview(q, 3, 5000);
+        out.monotonic = CARDS[key].last > Date.now() + 299000 && CARDS[key].reps === 3;
+        if(was) CARDS[key] = was; else delete CARDS[key];
+        delete DIRTY[key]; LOGQ = LOGQ.filter(function(e){ return e.card_key !== key; });
+        __quiet();
+        AUTH = save.AUTH; UID = save.UID; ADMIN.seen = {}; quiz = null; view = {name:'home'}; renderNow();
+        return JSON.stringify(out);
+      });
+  })()`));
+  check(r.pt404 === 'החבילה לא נמצאה', '404 אמיתי מדווח כמיגרציה חסרה: ' + r.pt404);
+  check(r.seen === '2026-09-01T10:00:00.123456+00:00', 'האישור לא נשלח עם הגרסה שהוצגה: ' + r.seen);
+  check(r.unsub === 'הסר', 'אי אפשר להסיר נושא שממתין לאישור חוזר');
+  check(r.monotonic, 'חזרה אחרי מצב מ"שעון מקדים" נחתמה כישנה ותידחה בשרת');
+}
+
 /* 5q — צ'אט ההוספה: היסטוריה, צירוף קבצים, והדבקה מהלוח */
 {
   const src = win.eval('openAddSheet.toString()');

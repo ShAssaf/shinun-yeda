@@ -207,6 +207,9 @@ begin
   end if;
 
   if tg_op = 'INSERT' then
+    -- גם ביצירה updated_at אינו בידי הבעלים: אחרת מחיקה ויצירה מחדש עם אותו
+    -- id ואותו updated_at שהאדמין ראה הייתה מעבירה תוכן אחר דרך p_seen.
+    new.updated_at    := now();
     new.review_status := case when new.visibility = 'public' then 'pending' else 'none' end;
     new.reviewed_by   := null;
     new.reviewed_at   := null;
@@ -214,8 +217,14 @@ begin
     return new;
   end if;
 
-  -- עדכון של משתמש רגיל: שדות הבקרה והבעלות אינם בידיו
+  -- עדכון של משתמש רגיל: שדות הבקרה, הבעלות והזמנים אינם בידיו.
+  -- updated_at זז רק כשהתוכן משתנה — זו הגרסה שהאדמין מאשר (admin_review_deck
+  -- משווה אליה), ולכן אסור שהבעלים יוכל לקבע אותה.
   new.owner_id      := old.owner_id;
+  new.created_at    := old.created_at;
+  new.updated_at    := case when (new.data, new.title, new.subtitle, new.kind)
+                                 is distinct from (old.data, old.title, old.subtitle, old.kind)
+                            then now() else old.updated_at end;
   new.review_status := old.review_status;
   new.reviewed_by   := old.reviewed_by;
   new.reviewed_at   := old.reviewed_at;
@@ -246,7 +255,8 @@ create trigger decks_moderate before insert or update on public.decks
 --   הבעלים — תמיד.
 --   כולם — ציבורית ומאושרת.
 --   מנוי — ציבורית גם בזמן שעריכה ממתינה לאישור.
---   אדמין — כל חבילה ציבורית, כולל ממתינות. לא חבילות פרטיות של אחרים.
+--   אדמין — כל חבילה ציבורית, כולל ממתינות, וחבילות שהוא דחה (כדי לעיין
+--           בהן ולמחוק). לא שאר החבילות הפרטיות של אחרים.
 -- אין רקורסיה: subs_read בודק רק user_id ואינו נוגע ב-decks.
 drop policy if exists decks_read on public.decks;
 create policy decks_read on public.decks
@@ -258,6 +268,7 @@ create policy decks_read on public.decks
           select 1 from public.deck_subscriptions s
           where s.deck_id = decks.id and s.user_id = auth.uid()))
     or (visibility = 'public' and (select public.is_admin()))
+    or (review_status = 'rejected' and (select public.is_admin()))
   );
 
 -- אדמין מוחק חבילה ציבורית פוגענית. מדיניות decks_delete של הבעלים נשארת.
@@ -276,38 +287,55 @@ create policy subs_write on public.deck_subscriptions
                   and (d.owner_id = auth.uid()
                        or (d.visibility = 'public' and d.review_status = 'approved'))));
 
--- האדמין צריך לראות מה השתנה מאז האישור — אבל רק בחבילות ציבוריות,
--- באותו גבול שבו הוא רואה את החבילות עצמן.
+-- האדמין צריך לראות מה השתנה מאז האישור — באותו גבול שבו הוא רואה את
+-- החבילות עצמן: ציבוריות, ומה שהוא דחה.
 drop policy if exists deck_history_read on public.deck_history;
 create policy deck_history_read on public.deck_history
   for select to authenticated
   using (exists (select 1 from public.decks d
                  where d.id = deck_history.deck_id
                    and (d.owner_id = auth.uid()
-                        or (d.visibility = 'public' and (select public.is_admin())))));
+                        or ((d.visibility = 'public' or d.review_status = 'rejected')
+                            and (select public.is_admin())))));
 
 -- ------------------------------------------------------- 6. פעולות אדמין
 -- כולן security definer ובודקות is_admin() בשורה הראשונה. זו ההרשאה
 -- היחידה; ה-GRANT ל-authenticated רק מאפשר לקרוא להן.
 -- פונקציה שמחזירה טבלה נמחקת קודם: create or replace נכשל אם העמודות השתנו.
 
--- הכרעה על חבילה. approved — נשארת ציבורית ומאושרת.
--- rejected — חוזרת לפרטית, עם הערה שהבעלים רואה.
-create or replace function public.admin_review_deck(p_deck uuid, p_verdict text, p_note text default null)
+-- הכרעה על חבילה.
+--   approved — נשארת ציבורית ומאושרת. רק אם התוכן הוא בדיוק מה שהאדמין
+--              ראה (p_seen = updated_at של אותה גרסה): אחרת בעלים שמחליף
+--              תוכן בין התצוגה לאישור היה מקבל אישור על משהו שאיש לא ראה.
+--   rejected — חוזרת לפרטית, עם הערה שהבעלים רואה, והמינויים של אחרים
+--              נמחקים. בלי זה פרסום חוזר היה מציג למנויים הישנים תוכן
+--              שאיש לא אישר, עוד לפני שהאדמין ראה אותו.
+-- החתימה השתנתה (נוסף p_seen), ולכן הגרסה הקודמת נמחקת.
+drop function if exists public.admin_review_deck(uuid, text, text);
+create or replace function public.admin_review_deck(p_deck uuid, p_verdict text,
+                                                    p_note text default null,
+                                                    p_seen timestamptz default null)
 returns text
 language plpgsql security definer set search_path = public as $$
 declare
   v_visibility text;
+  v_updated    timestamptz;
+  v_owner      uuid;
   v_status     text;
 begin
   if not public.is_admin() then raise exception 'אין הרשאה' using errcode = '42501'; end if;
 
   -- PT404: קוד שגיאה ש-PostgREST מתרגם ל-HTTP 404
-  select d.visibility into v_visibility from public.decks d where d.id = p_deck for update;
+  select d.visibility, d.updated_at, d.owner_id into v_visibility, v_updated, v_owner
+    from public.decks d where d.id = p_deck for update;
   if not found then raise exception 'החבילה לא נמצאה' using errcode = 'PT404'; end if;
 
   if p_verdict = 'approved' then
     if v_visibility <> 'public' then raise exception 'החבילה אינה ציבורית'; end if;
+    -- PT409: ‏HTTP 409 — הגרסה השתנתה
+    if p_seen is null or v_updated is distinct from p_seen then
+      raise exception 'הנושא השתנה מאז שנטען — פתח אותו שוב לפני האישור' using errcode = 'PT409';
+    end if;
     update public.decks
        set review_status = 'approved', reviewed_by = auth.uid(),
            reviewed_at = now(), review_note = null
@@ -320,6 +348,8 @@ begin
            reviewed_by = auth.uid(), reviewed_at = now()
      where id = p_deck
     returning review_status into v_status;
+    delete from public.deck_subscriptions s
+     where s.deck_id = p_deck and s.user_id <> v_owner;
   else
     raise exception 'הכרעה לא מוכרת: %', coalesce(p_verdict, 'null');
   end if;
@@ -327,8 +357,8 @@ begin
   return v_status;
 end $$;
 
-revoke all on function public.admin_review_deck(uuid, text, text) from public, anon;
-grant execute on function public.admin_review_deck(uuid, text, text) to authenticated;
+revoke all on function public.admin_review_deck(uuid, text, text, timestamptz) from public, anon;
+grant execute on function public.admin_review_deck(uuid, text, text, timestamptz) to authenticated;
 
 -- תור הבדיקה: כל החבילות הציבוריות והנדחות, ממתינות קודם
 drop function if exists public.admin_moderation();

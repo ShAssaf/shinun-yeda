@@ -63,9 +63,11 @@ self.addEventListener('fetch', (e) => {
   if (fresh) {
     /* רשת-תחילה: הגרסה החדשה מנצחת, והקאש הוא רשת ביטחון לאופליין.
        no-cache — אימות מול השרת גם כשמטמון ה-HTTP עוד "טרי". בקשת
-       ניווט אי אפשר לשכפל עם אפשרויות, ולכן היא נבנית מה-URL. */
+       ניווט אי אפשר לשכפל עם אפשרויות, ולכן היא נבנית מה-URL — עם
+       redirect:'manual', כי תשובה שעברה הפניה אסורה כתשובה לניווט
+       (הדפדפן עוקב אחרי ההפניה בעצמו). */
     const net = request.mode === 'navigate'
-      ? fetch(request.url, { cache: 'no-cache', credentials: 'same-origin' })
+      ? fetch(request.url, { cache: 'no-cache', credentials: 'same-origin', redirect: 'manual' })
       : fetch(request, { cache: 'no-cache' });
     e.respondWith(
       net

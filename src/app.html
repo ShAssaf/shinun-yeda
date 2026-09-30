@@ -1146,7 +1146,9 @@ let store = defaultSettings();
 let SETTINGS_VER = 0;
 function saveState(s){ uwrite(KEY, s); }
 function setExamDate(v){
-  store.examDate = v || null; store.examAt = Date.now(); store.dirty = true; SETTINGS_VER++;
+  /* מונוטוני: שעון שקפץ אחורה לא יהפוך שינוי חדש לישן מזה שבשרת */
+  store.examDate = v || null; store.examAt = Math.max(Date.now(), (store.examAt || 0) + 1);
+  store.dirty = true; SETTINGS_VER++;
   saveState(store);
 }
 function bumpRounds(){
@@ -1269,6 +1271,9 @@ function loadUserState(){
   LIB.subs   = null;
   LIB.at     = 0;
   DECKS = buildDecks(LIB.rows);
+  /* מפה ממה שבמטמון, אבל שליחה של מפתחות ישנים רק אחרי שהספרייה אומתה */
+  LEGACY_READY = false;
+  refreshLegacyMap();
 }
 
 /* העברה חד־פעמית מהמרחב הישן (בלי uid) אל המשתמש הראשון שמזוהה.
@@ -1277,6 +1282,14 @@ function loadUserState(){
    לשליחה — השרת שומר את המאוחר מבין השניים. */
 function adoptLegacy(uid){
   const scoped = function(b){ return b + ':' + uid; };
+  /* המטמון הישן מסגיר של מי הוא: אם יש בו חבילות פרטיות, ואף אחת מהן
+     אינה של המשתמש הזה — הנתונים שייכים למי שהיה מחובר לפני העדכון.
+     משאירים אותם לו, במקום להעלות את ההיסטוריה שלו לחשבון של אחר. */
+  const peek = jread(ROWS_KEY, null);
+  const priv = Array.isArray(peek) ? peek.filter(function(r){
+    return isObj(r) && r.owner_id && r.visibility !== 'public';
+  }) : [];
+  if(priv.length && !priv.some(function(r){ return r.owner_id === uid; })) return;
   const oldCards = jread(CARDS_KEY, null), oldDirty = jread(DIRTY_KEY, null);
   const oldLog = jread(LOG_KEY, null), oldQueue = jread(QUEUE_KEY, null);
 
@@ -1317,6 +1330,9 @@ function adoptLegacy(uid){
     if(jread(scoped(KEY), null) === null){
       const s = normSettings(oldSettings);
       s.dirty = true;                      /* ייתכן שמעולם לא נשמר בשרת */
+      /* ישן מכל שינוי אמיתי, אבל חדש מ"אין תאריך" — כך הוא מגיע למכשיר
+         ריק ולא דורס תאריך שנקבע אחר כך במכשיר אחר */
+      if(s.examDate && !s.examAt) s.examAt = 1;
       ok = jwrite(scoped(KEY), s);
     }
     if(ok) jremove(KEY);
@@ -1409,8 +1425,13 @@ function pullCards(ep, uid){
 }
 
 function mergeRemote(rows){
-  const onServer = {};
+  const onServer = {}, srvLast = {};
   let changed = false;
+  /* מה שבשרת תחת המפתח החדש — כדי ששורה ישנה תחת המפתח הישן לא תסמן
+     את הכרטיס לשליחה שוב ושוב בכל סנכרון */
+  rows.forEach(function(row){
+    if(!legacyTarget(row.card_key)) srvLast[row.card_key] = Date.parse(row.last_review);
+  });
   rows.forEach(function(row){
     const remote = { s:+row.stability, d:+row.difficulty,
                      due:Date.parse(row.due), last:Date.parse(row.last_review),
@@ -1420,9 +1441,10 @@ function mergeRemote(rows){
     const key = mapped || row.card_key;
     const local = CARDS[key];
     if(mapped){
-      /* שורה בשרת תחת המפתח הישן: המצב עובר למפתח החדש, ונשלח תחתיו */
-      if(!local || remote.last > local.last) CARDS[key] = remote;
-      DIRTY[key] = 1; changed = true;
+      /* שורה בשרת תחת המפתח הישן: המצב עובר למפתח החדש, ונשלח תחתיו —
+         רק אם הוא חדש יותר ממה שכבר יש שם */
+      if(!local || remote.last > local.last){ CARDS[key] = remote; changed = true; }
+      if(!(srvLast[key] >= CARDS[key].last) && !DIRTY[key]){ DIRTY[key] = 1; changed = true; }
       return;
     }
     if(!local || remote.last > local.last){
@@ -1447,7 +1469,7 @@ function mergeRemote(rows){
 function pushCards(ep, uid){
   if(!canSyncUser() || uid !== UID || ep !== USER_EPOCH) return Promise.resolve();
   const keys = Object.keys(DIRTY).filter(function(k){
-    if(validState(CARDS[k]) && !legacyTarget(k)) return true;
+    if(validState(CARDS[k]) && !legacyTarget(k) && !legacyHeld(k)) return true;
     if(!CARDS[k]) delete DIRTY[k];
     return false;
   });
@@ -1479,7 +1501,9 @@ function pushCards(ep, uid){
 
 function pushLogs(ep, uid){
   if(!canSyncUser() || uid !== UID || ep !== USER_EPOCH || !LOGQ.length) return Promise.resolve();
-  const batch = LOGQ.slice(0, CARD_CHUNK).map(function(e){
+  const ready = LOGQ.filter(function(e){ return !legacyHeld(e.card_key); });
+  if(!ready.length) return Promise.resolve();
+  const batch = ready.slice(0, CARD_CHUNK).map(function(e){
     return { user_id:uid, client_id:e.id, card_key:legacyTarget(e.card_key) || e.card_key,
              rating:e.rating, elapsed_days:numOrNull(e.elapsed_days),
              duration_ms:clampMs(e.duration_ms), reviewed_at:e.reviewed_at };
@@ -1517,7 +1541,17 @@ function pushLogs(ep, uid){
    'fg:methyl' — לפני שהתוכן עבר למסד. אחרי ייבוא ערכת הפתיחה אותו תוכן
    חי בחבילה עם uuid, והמפתח צריך לעבור איתו, אחרת ההיסטוריה נראית
    כאילו נמחקה. המיפוי לפי סוג וכותרת, כמו בייבוא. */
-let LEGACY_MAP = {}, LEGACY_PREFIXES = [];
+let LEGACY_MAP = {}, LEGACY_PREFIXES = [], LEGACY_READY = false, LOCAL_PREFIXES = null;
+/* מפתח מהתקופה של התוכן המוטמע, בלי קשר לשאלה אם יש לו חבילה ממופה */
+function isLegacyKey(key){
+  if(!LOCAL_PREFIXES) LOCAL_PREFIXES = localRows().map(function(r){ return r.id + ':'; });
+  for(let i=0;i<LOCAL_PREFIXES.length;i++) if(key.indexOf(LOCAL_PREFIXES[i]) === 0) return true;
+  return false;
+}
+/* מפתח ישן נשלח רק כשברור שאין לו חבילה ממופה — אחרי טעינת ספרייה
+   מוצלחת. אחרת הוא היה נשלח כמו שהוא, ואחר כך שוב תחת המפתח החדש,
+   והשרת היה נשאר עם שתי שורות לאותו כרטיס. */
+function legacyHeld(key){ return !LEGACY_READY && isLegacyKey(key); }
 function refreshLegacyMap(){
   LEGACY_MAP = {}; LEGACY_PREFIXES = [];
   if(!UID) return;
@@ -1539,6 +1573,7 @@ function legacyTarget(key){
 }
 function remapLegacyKeys(){
   refreshLegacyMap();
+  LEGACY_READY = LIB.status === 'ok';
   if(!LEGACY_PREFIXES.length) return 0;
   let moved = 0;
   Object.keys(CARDS).forEach(function(k){
@@ -1569,8 +1604,10 @@ function pullSettings(){
       }
       const at = Date.parse(row.updated_at) || 0;
       let changed = false;
-      /* שינוי מקומי שעוד לא נשלח לא נדרס; שינוי שנעשה בזמן הבקשה גם לא */
-      if(ver === SETTINGS_VER && at > (store.examAt || 0) && (row.exam_date || null) !== store.examDate){
+      /* שינוי מקומי שעוד לא נשלח לא נדרס; שינוי שנעשה בזמן הבקשה גם לא.
+         מכשיר שמעולם לא ידע תאריך מקבל כל תאריך שבשרת. */
+      const newer = at > (store.examAt || 0) || (!store.examAt && !store.examDate && !!row.exam_date);
+      if(ver === SETTINGS_VER && newer && (row.exam_date || null) !== store.examDate){
         store.examDate = row.exam_date || null; store.examAt = at; changed = true;
       }
       const rounds = row.rounds || 0;
@@ -1588,15 +1625,15 @@ function pushSettings(){
   if(!canSyncUser()) return Promise.resolve(false);
   if(pushingSettings){ settingsAgain = true; return pushingSettings; }
   const ep = USER_EPOCH, ver = SETTINGS_VER;
+  /* מכשיר שמעולם לא קבע ולא למד תאריך לא שולח exam_date בכלל — upsert
+     מעדכן רק את העמודות שנשלחו, כך שהוא לא יכול למחוק תאריך קיים */
+  const body = { user_id: UID, rounds: store.rounds || 0,
+                 updated_at: new Date(store.examAt || 0).toISOString() };
+  if(store.examAt > 0) body.exam_date = store.examDate || null;
   pushingSettings = rest('user_settings?on_conflict=user_id', {
     method:'POST',
     headers:{Prefer:'resolution=merge-duplicates,return=minimal'},
-    body: JSON.stringify({
-      user_id:    UID,
-      exam_date:  store.examDate || null,
-      rounds:     store.rounds || 0,
-      updated_at: new Date(store.examAt || 0).toISOString()
-    })
+    body: JSON.stringify(body)
   }).then(function(r){ return r.ok; }, function(){ return false; })
     .then(function(ok){
       pushingSettings = null;
@@ -2195,6 +2232,7 @@ function fetchLibrary(){
     const mine = r[0], subs = r[1];
     if(!mine.ok) return mine;
     if(!subs.ok) return subs;
+    if(!Array.isArray(mine.data)) return {ok:false, reason:'תשובה לא צפויה'};
     const own = {};
     mine.data.forEach(function(d){ if(d && d.id) own[d.id] = 1; });
     const others = subs.data.filter(function(id){ return !own[id]; });
@@ -2232,6 +2270,7 @@ function fetchSubs(){
      מינויים של אחרים */
   return readJson('deck_subscriptions?select=deck_id&user_id=eq.' + UID).then(function(res){
     if(!res.ok) return res;
+    if(!Array.isArray(res.data)) return {ok:false, reason:'תשובה לא צפויה'};
     return {ok:true, data:res.data.map(function(x){ return x.deck_id; })};
   });
 }
@@ -2698,8 +2737,11 @@ function submitActivity(){
 }
 function scheduleReview(q, grade, ms){
   const prev  = cardState(q.key);
-  const elapsedDays = prev ? (Date.now() - prev.last) / DAY : null;
-  const st    = reviewCard(prev, grade);
+  /* מונוטוני מול המצב הקודם: אם הוא נחתם בשעון שמקדים (מכשיר אחר), חזרה
+     "מוקדמת" ממנו הייתה נדחית בשרת כישנה, ונדרסת במשיכה הבאה */
+  const now   = Math.max(Date.now(), prev ? prev.last + 1 : 0);
+  const elapsedDays = prev ? Math.max(0, now - prev.last) / DAY : null;
+  const st    = reviewCard(prev, grade, now);
   q.interval  = Math.round((st.due - Date.now()) / DAY);
   recordReview(q.key, st, grade, elapsedDays, ms);
 }
@@ -3439,13 +3481,25 @@ function fillFromClaims(){
    רק אם המכשיר הזה ביקש התחברות בחצי השעה האחרונה: אחרת קישור עם
    טוקנים של מישהו אחר היה מכניס את המכשיר לחשבון שלו בשקט. */
 (function absorbHash(){
-  if(!location.hash || location.hash.indexOf('access_token=')<0) return;
+  /* החותמת נצרכת בכל טעינה — גם בחזרה בלי טוקנים (ביטול, "אחורה" מגוגל,
+     שגיאה). כך היא תקפה רק לחזרה הראשונה אחרי ההתחברות, ולא נשארת
+     פתוחה לקישור שמגיע אחר כך. */
+  const started = jread(SIGNIN_KEY, null);
+  if(started) jremove(SIGNIN_KEY);
+  if(!location.hash) return;
   const p = new URLSearchParams(location.hash.slice(1));
   const at = p.get('access_token'), rt = p.get('refresh_token');
+  if(!at && !p.get('error')) return;
   history.replaceState(null, '', location.pathname + location.search);
-  const started = jread(SIGNIN_KEY, null);
-  jremove(SIGNIN_KEY);
-  if(!at || !isObj(started) || !(Date.now() - (started.t || 0) < 30*60000)) return;
+  if(!at){
+    view.lockErr = 'ההתחברות בוטלה או נכשלה' + (p.get('error_description') ? ': ' + p.get('error_description') : '.');
+    return;
+  }
+  if(!isObj(started) || !(Date.now() - (started.t || 0) < 15*60000)){
+    view.lockErr = 'ההתחברות לא הושלמה במכשיר הזה. התחבר שוב מכאן.';
+    logError('client', 'חזרה מהתחברות בלי חותמת מקומית — נדחתה', null);
+    return;
+  }
   const c = claims(at);
   AUTH = {access:at, refresh:rt, email:c.email || null, uid:c.sub || null, verifiedAt:0};
   authWrite(AUTH);
@@ -3589,12 +3643,18 @@ function adoptFromDisk(){
   return true;
 }
 
-/* הקריאה היחידה שמחליפה טוקן. מחזירה 'ok' · 'transient' · 'terminal' · 'aborted' */
+/* הקריאה היחידה שמחליפה טוקן. מחזירה 'ok' · 'transient' · 'terminal' · 'aborted'.
+   שתי מצבים שונים אחרי שהבקשה יצאה:
+     signedOut — המשתמש התנתק בינתיים: המפגש החדש מבוטל ולא חוזר לחיים.
+     rotated   — לשונית אחרת כבר רעננה את אותו מפגש וכבר אימצנו את הטוקן
+                 שלה. זו הצלחה, ואסור לבטל: הביטול היה מוחק את המפגש המשותף
+                 ומנתק את כל הלשוניות. */
 function doRefresh(){
   if(!AUTH || !AUTH.refresh) return Promise.resolve('terminal');
   if(adoptFromDisk()) return Promise.resolve('ok');
   const ep = SESSION.epoch, rt = AUTH.refresh;
-  const gone = function(){ return ep !== SESSION.epoch || !AUTH || AUTH.refresh !== rt; };
+  const signedOut = function(){ return ep !== SESSION.epoch || !AUTH; };
+  const rotated   = function(){ return !!AUTH && AUTH.refresh !== rt; };
   return fetch(CFG.supabaseUrl + '/auth/v1/token?grant_type=refresh_token', {
     method:'POST',
     headers:{ apikey: CFG.supabaseKey, 'Content-Type':'application/json' },
@@ -3602,8 +3662,8 @@ function doRefresh(){
   }).then(function(r){
     if(r.ok) return r.json().then(function(j){
       if(!j || !j.access_token) return 'terminal';
-      /* התנתקות בזמן הבקשה — המפגש החדש מבוטל ולא חוזר לחיים */
-      if(gone()){ revoke(j.access_token); return 'aborted'; }
+      if(signedOut()){ revoke(j.access_token); return 'aborted'; }
+      if(rotated()) return 'ok';
       /* משמרים את שאר הזהות — בנייה מחדש מחקה את uid ושברה הכול */
       AUTH = Object.assign({}, AUTH, {
         access:  j.access_token,
@@ -3613,7 +3673,8 @@ function doRefresh(){
       scheduleRefresh();
       return 'ok';
     });
-    if(gone()) return 'aborted';
+    if(signedOut()) return 'aborted';
+    if(rotated()) return 'ok';
     return r.text().then(function(t){
       SESSION.lastError = String(t).slice(0, 200);
       if(adoptFromDisk()) return 'ok';
@@ -3635,7 +3696,7 @@ function ensureToken(force){
   if(!AUTH || !AUTH.access) return Promise.resolve(false);
   if(!force && !tokenStale()) return Promise.resolve(true);
   if(!SESSION.refreshing){
-    SESSION.refreshing = doRefresh().then(function(res){
+    SESSION.refreshing = refreshLocked().then(function(res){
       SESSION.refreshing = null;
       if(res === 'terminal'){ hardSignOut(); return false; }
       if(res === 'transient') retryRefreshLater();
@@ -3643,6 +3704,18 @@ function ensureToken(force){
     });
   }
   return SESSION.refreshing;
+}
+
+/* לשוניות פתוחות מרעננות באותו רגע (אותו exp). נעילה משותפת מסדרת אותן:
+   השנייה נכנסת אחרי הראשונה, מוצאת את הטוקן החדש בדיסק ומאמצת אותו
+   (adoptFromDisk בתחילת doRefresh) במקום לשרוף עוד טוקן רענון. */
+function refreshLocked(){
+  try{
+    if(navigator.locks && typeof navigator.locks.request === 'function')
+      return navigator.locks.request('shinun-refresh', function(){ return doRefresh(); })
+        .catch(function(){ return doRefresh(); });
+  }catch(e){}
+  return doRefresh();
 }
 
 /* רענון יזום לפני הפקיעה, כדי שפעולה של המשתמש לא תשלם על בקשה
@@ -4152,6 +4225,13 @@ function openStore(highlight){
     view.others = pub.ok ? pub.data.filter(function(d){ return mineIds.indexOf(d.id) < 0; }) : [];
     view.storeErr = pub.ok ? null : (pub.reason || 'לא הצלחתי לטעון');
     view.subs   = Array.isArray(LIB.subs) ? LIB.subs : [];
+    /* נושא שאני רשום אליו ונערך מאז — לא במאגר עד שיאושר שוב, אבל עדיין
+       אצלי. בלעדיו לא הייתה דרך להסיר אותו. */
+    const listed = view.others.map(function(d){ return d.id; });
+    LIB.rows.forEach(function(d){
+      if(d.owner_id !== uid && view.subs.indexOf(d.id) > -1 && listed.indexOf(d.id) < 0)
+        view.others.push(Object.assign({}, d, {awaiting:true}));
+    });
     view.review = r[2] || {};
     view.libError = LIB.status !== 'ok' ? (LIB.reason || 'לא הצלחתי לרענן') : null;
     view.loading = false;
@@ -4207,6 +4287,7 @@ function renderStore(){
       '</strong>'+
       '<span>'+count+' כרטיסים'+(d.subtitle ? ' · '+esc(d.subtitle) : '')+'</span>'+
       (mine && ps.note ? '<span class="rnote">הערת המאשר: '+esc(ps.note)+'</span>' : '')+
+      (!mine && d.awaiting ? '<span class="rnote">נערך מאז שאושר — ממתין לאישור חוזר</span>' : '')+
       '</div>'+
       (mine
         ? (ps.live ? '<button class="act" data-link="'+esc(d.id)+'" aria-label="העתק קישור">קישור</button>' : '')+
@@ -4552,7 +4633,7 @@ function renderStats(){
      משתמשים   — מי פעיל, והאם הסנכרון שלו באמת מגיע לשרת
      מערכת     — מצב המכשיר הזה, וסנכרון יזום
    =========================================================== */
-const ADMIN = { pending: 0 };
+const ADMIN = { pending: 0, seen: {} };   /* seen: הגרסה (updated_at) שנפתחה בתצוגה */
 
 function rpc(name, args, quiet){
   return rest('rpc/' + name, {method:'POST', quiet:!!quiet, body: JSON.stringify(args || {})});
@@ -4564,7 +4645,8 @@ function rpcJson(name, args, quiet){
     return r.text().then(function(t){
       let m = t, code = '';
       try{ const j = JSON.parse(t); m = j.message || t; code = j.code || ''; }catch(e){}
-      if(r.status === 404 || code === 'PGRST202')
+      /* PGRST202 = הפונקציה לא קיימת. 404 אחר (PT404) הוא "לא נמצא" אמיתי */
+      if(code === 'PGRST202' || (r.status === 404 && !code))
         throw new Error('צריך להריץ את מיגרציה 0006 ב-SQL Editor של Supabase');
       throw new Error(String(m || ('HTTP ' + r.status)).slice(0, 200));
     });
@@ -4575,7 +4657,7 @@ function rpcJson(name, args, quiet){
 function loadAdminBadge(){
   if(!AUTH || !AUTH.admin || !canSyncUser()) return Promise.resolve();
   return rpcJson('admin_moderation', {}, true).then(function(rows){
-    const n = (rows || []).filter(function(d){ return d.review_status === 'pending'; }).length;
+    const n = (Array.isArray(rows) ? rows : []).filter(function(d){ return d.review_status === 'pending'; }).length;
     if(n !== ADMIN.pending){ ADMIN.pending = n; render(); }
   }).catch(function(){});
 }
@@ -4589,11 +4671,11 @@ function loadAdmin(){
   const v = view;
   v.loading = true; v.err = null;
   const want = v.tab === 'users'
-    ? rpcJson('admin_users').then(function(rows){ v.users = rows || []; })
+    ? rpcJson('admin_users').then(function(rows){ v.users = Array.isArray(rows) ? rows : []; })
     : v.tab === 'system'
       ? Promise.resolve()
       : rpcJson('admin_moderation').then(function(rows){
-          v.decks = rows || [];
+          v.decks = Array.isArray(rows) ? rows : [];
           ADMIN.pending = v.decks.filter(function(d){ return d.review_status === 'pending'; }).length;
         });
   return want.then(function(){ v.loading = false; v.loaded = true; if(view === v) render(); },
@@ -4716,23 +4798,28 @@ function wireAdminDecks(v){
     }, function(e){
       b.disabled = false;
       v.err = 'הפעולה נכשלה: ' + ((e && e.message) || 'שגיאה');
-      render();
+      /* הרשימה אולי ישנה (נמחק, השתנה) — טוענים מחדש; השגיאה נשארת */
+      loadAdmin().then(function(){ v.err = v.err || 'הפעולה נכשלה: ' + ((e && e.message) || 'שגיאה'); render(); });
     });
   };
   Array.prototype.forEach.call(app.querySelectorAll('[data-approve]'), function(b){
     b.addEventListener('click', function(){
       const d = byId(b.dataset.approve);
-      act(b, function(){ return rpcJson('admin_review_deck', {p_deck:d.id, p_verdict:'approved', p_note:null}); },
+      /* האישור הוא לגרסה שהאדמין ראה — ברשימה או בתצוגה. אם הבעלים שינה
+         מאז, השרת מסרב (409) והרשימה נטענת מחדש. */
+      const seen = ADMIN.seen[d.id] || d.updated_at;
+      act(b, function(){ return rpcJson('admin_review_deck', {p_deck:d.id, p_verdict:'approved', p_note:null, p_seen:seen}); },
           '"' + (d.title || '') + '" אושר ומופיע במאגר.');
     });
   });
   Array.prototype.forEach.call(app.querySelectorAll('[data-reject]'), function(b){
     b.addEventListener('click', function(){
       const d = byId(b.dataset.reject);
-      const note = prompt('למה? ההערה תוצג לבעלים (אפשר להשאיר ריק).', '');
+      const note = prompt('למה? ההערה תוצג לבעלים (אפשר להשאיר ריק). ' +
+                          'הנושא יוסר גם ממי שכבר הוסיף אותו.', '');
       if(note === null) return;
       act(b, function(){ return rpcJson('admin_review_deck', {p_deck:d.id, p_verdict:'rejected', p_note:note}); },
-          '"' + (d.title || '') + '" הוסתר מהמאגר. הבעלים רואה אותו כ"נדחה".');
+          '"' + (d.title || '') + '" הוסתר מהמאגר ומהמנויים. הבעלים רואה אותו כ"נדחה".');
     });
   });
   Array.prototype.forEach.call(app.querySelectorAll('[data-adel]'), function(b){
@@ -4750,6 +4837,7 @@ function wireAdminDecks(v){
         b.disabled = false;
         let deck = null;
         try{ deck = res.ok && res.data[0] ? makeDeck(res.data[0], 0) : null; }catch(e){ deck = null; }
+        if(res.ok && res.data[0]) ADMIN.seen[res.data[0].id] = res.data[0].updated_at;
         if(!deck || !deck.items || !deck.items.length){
           v.err = res.ok ? 'אין בנושא פריטים תקינים להצגה.' : 'לא הצלחתי לטעון (' + res.reason + ').';
           render();
@@ -4932,7 +5020,7 @@ function parentOf(q, v){
   if(v.name === 'home') return null;
   if(v.name === 'map') return deckOr(v.back);
   if(v.name === 'browse') return v.preview ? {name:'admin', tab:v.fromTab || 'queue'} : deckOr(v.deck);
-  if(v.name === 'errors') return AUTH && AUTH.admin ? {name:'admin', tab:'errors'} : {name:'home'};
+  if(v.name === 'errors') return AUTH && AUTH.admin ? {name:'admin', tab:'queue'} : {name:'home'};
   return {name:'home'};
 }
 function depthOf(){
@@ -5054,13 +5142,16 @@ function syncAll(){
     .then(function(){
       if(!canSyncUser()) return false;
       lastFullSync = Date.now();
+      let cardsOk = true;
       return Promise.all([
-        syncLibrary().catch(function(){}).then(function(){ return syncCards(true); }),
+        syncLibrary().catch(function(){})
+          .then(function(){ return syncCards(true); })
+          .then(function(v){ cardsOk = v !== false; }),
         syncSettings(),
         flushErrors(),
         checkAdmin(),
         verifyAccess(false)
-      ]).then(function(){ return LIB.status === 'ok'; });
+      ]).then(function(){ return LIB.status === 'ok' && cardsOk; });
     })
     .catch(function(err){
       logError('client', 'sync → ' + ((err && err.message) || 'נכשל'), null);
