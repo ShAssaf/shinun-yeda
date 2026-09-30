@@ -21,11 +21,21 @@ const SHELL = [
 
 /* קבצים שתוכנם משתנה בין גרסאות — חייבים לעבור דרך הרשת קודם */
 const FRESH = /\/$|index\.html$|\.webmanifest$/;
+/* בלי אלה אין אפליקציה אופליין. השאר (גופנים בבנייה מקומית למשל)
+   רשות — קובץ חסר לא מכשיל את כל ההתקנה. */
+const REQUIRED = ['./', './index.html'];
+
+/* cache:'reload' עוקף את מטמון ה-HTTP (GitHub Pages שומר עשר דקות),
+   אחרת SW חדש עלול לשמור בקאש שלו את index.html הישן */
+const reloadReq = (u) => (typeof Request === 'function' ? new Request(u, { cache: 'reload' }) : u);
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
     caches.open(CACHE)
-      .then((c) => c.addAll(SHELL))
+      .then((c) => Promise.all(SHELL.map((u) => {
+        const p = c.add(reloadReq(u));
+        return REQUIRED.includes(u) ? p : p.catch(() => {});
+      })))
       .then(() => self.skipWaiting()),
   );
 });
@@ -51,9 +61,16 @@ self.addEventListener('fetch', (e) => {
   const fresh = request.mode === 'navigate' || FRESH.test(url.pathname);
 
   if (fresh) {
-    /* רשת-תחילה: הגרסה החדשה מנצחת, והקאש הוא רשת ביטחון לאופליין */
+    /* רשת-תחילה: הגרסה החדשה מנצחת, והקאש הוא רשת ביטחון לאופליין.
+       no-cache — אימות מול השרת גם כשמטמון ה-HTTP עוד "טרי". בקשת
+       ניווט אי אפשר לשכפל עם אפשרויות, ולכן היא נבנית מה-URL — עם
+       redirect:'manual', כי תשובה שעברה הפניה אסורה כתשובה לניווט
+       (הדפדפן עוקב אחרי ההפניה בעצמו). */
+    const net = request.mode === 'navigate'
+      ? fetch(request.url, { cache: 'no-cache', credentials: 'same-origin', redirect: 'manual' })
+      : fetch(request, { cache: 'no-cache' });
     e.respondWith(
-      fetch(request)
+      net
         .then((res) => {
           if (res.ok) {
             const copy = res.clone();

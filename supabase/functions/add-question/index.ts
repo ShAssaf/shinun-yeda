@@ -227,26 +227,28 @@ function validateLabel(ui: unknown, item: Record<string, unknown>, i: number, er
 
 /* ---------- אימות ---------- */
 /* טוקן גוגל דרך Supabase, או סיסמה כגיבוי. ALLOWED_EMAILS חובה לזרימת הטוקן —
-   בלעדיו כל חשבון גוגל בעולם היה מורשה, ולכן נכשלים סגור. */
+   בלעדיו כל חשבון גוגל בעולם היה מורשה, ולכן נכשלים סגור.
+   uid מוחזר מאותה קריאה ל-/auth/v1/user, כדי לא לשאול שוב. במסלול הסיסמה
+   אין משתמש, ולכן uid ריק — ושם ממילא אין כתיבה למסד. */
 async function authorize(req: Request, body: { passphrase?: string }, pass: string) {
   const bearer = req.headers.get('Authorization')?.replace(/^Bearer\s+/i, '').trim();
   if (bearer) {
     const url = Deno.env.get('SUPABASE_URL')?.trim();
     const anon = Deno.env.get('SUPABASE_ANON_KEY')?.trim();
-    if (!url || !anon) return { ok: false, editor: false, msg: 'הגדרות Supabase חסרות בפונקציה' };
+    if (!url || !anon) return { ok: false, editor: false, uid: '', msg: 'הגדרות Supabase חסרות בפונקציה' };
     const r = await fetch(`${url}/auth/v1/user`, {
       headers: { apikey: anon, Authorization: `Bearer ${bearer}` },
     });
-    if (!r.ok) return { ok: false, editor: false, msg: 'ההתחברות פגה. התחבר שוב.' };
-    const user = await r.json() as { email?: string };
+    if (!r.ok) return { ok: false, editor: false, uid: '', msg: 'ההתחברות פגה. התחבר שוב.' };
+    const user = await r.json() as { id?: string; email?: string };
     const allowed = (Deno.env.get('ALLOWED_EMAILS') ?? '')
       .split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
     /* התחברות פתוחה לכולם; עריכה שמוציאה כסף או נוגעת בקוד — רק לרשימה */
     const editor = allowed.includes((user.email ?? '').toLowerCase());
-    return { ok: true, editor, msg: editor ? '' : 'החשבון אינו מורשה לעריכה.' };
+    return { ok: true, editor, uid: user.id ?? '', msg: editor ? '' : 'החשבון אינו מורשה לעריכה.' };
   }
-  if (body.passphrase && safeEqual(body.passphrase, pass)) return { ok: true, editor: true, msg: '' };
-  return { ok: false, editor: false, msg: 'נדרשת התחברות' };
+  if (body.passphrase && safeEqual(body.passphrase, pass)) return { ok: true, editor: true, uid: '', msg: '' };
+  return { ok: false, editor: false, uid: '', msg: 'נדרשת התחברות' };
 }
 
 /* ---------- הנחיה ל-Claude ---------- */
@@ -374,6 +376,7 @@ const TOOL: Anthropic.Tool = {
 type Deck = {
   id: string; kind: string; title: string; subtitle: string | null;
   color: string | null; visibility: string; data: unknown; item_count: number;
+  review_status?: string;
 };
 
 function db(bearer: string) {
@@ -476,7 +479,7 @@ Deno.serve(async (req) => {
   if (!auth.editor) return json({ error: auth.msg }, 403);
 
   const bearer = req.headers.get('Authorization')?.replace(/^Bearer\s+/i, '').trim();
-  if (!bearer) return json({ error: 'כתיבה למסד דורשת התחברות, לא סיסמה.' }, 403);
+  if (!bearer || !auth.uid) return json({ error: 'כתיבה למסד דורשת התחברות, לא סיסמה.' }, 403);
 
   /* שיחה. הגרסה הישנה שלחה request+images — ממירים אותה לתור אחד. */
   const turns: Turn[] = Array.isArray(body.messages) && body.messages.length
@@ -507,9 +510,10 @@ Deno.serve(async (req) => {
   try {
     const rest = db(bearer);
 
-    /* הנושאים שהמשתמש רשאי לערוך — RLS כבר סינן */
+    /* הנושאים שבבעלות המשתמש. RLS לבדו לא מספיק: הוא מחזיר גם נושאים
+       ציבוריים של אחרים (ולאדמין — את כל הציבוריים), שאותם אי אפשר לערוך */
     const me = await rest.get('decks?select=id,kind,title,subtitle,color,visibility,item_count'
-      + '&order=created_at.asc') as Deck[];
+      + `&owner_id=eq.${auth.uid}&order=created_at.asc`) as Deck[];
 
     const catalogue = me.map((d) => ({
       id: d.id, kind: d.kind, title: d.title, items: d.item_count,
@@ -610,7 +614,7 @@ Deno.serve(async (req) => {
       /* תמיד מזהה המשתמש עצמו. שאילתה על שורה קיימת הייתה עלולה
          להחזיר בעלים של נושא ציבורי של מישהו אחר. */
       const created = await rest.post('decks', [{
-        owner_id:   await currentUid(bearer),
+        owner_id:   auth.uid,
         kind:       'topic',
         title:      patch.new_title || 'נושא חדש',
         subtitle:   patch.new_subtitle || null,
@@ -656,10 +660,13 @@ Deno.serve(async (req) => {
     const nextData = sec.put(list);
     const nextDeck = { ...full, data: nextData };
 
-    await rest.patch(`decks?id=eq.${full.id}`, {
+    /* PostgREST מחזיר 200 גם כשאף שורה לא עודכנה (RLS, או שהנושא נמחק
+       בינתיים). return=representation מחזיר את השורות, ומערך ריק = כישלון. */
+    const updated = await rest.patch(`decks?id=eq.${full.id}&owner_id=eq.${auth.uid}`, {
       data: nextData,
       item_count: countItems(nextDeck as Deck),
-    });
+    }) as Deck[];
+    if (!updated.length) return json({ error: 'הנושא לא עודכן: הוא נמחק או שאינו שלך.' }, 409);
 
     return json({
       ok: true, reply: reply, seconds: llmSecs,
@@ -667,6 +674,8 @@ Deno.serve(async (req) => {
         summary: patch.summary, deck: full.title, deck_id: full.id,
         section: patch.section, mode: patch.mode,
         added: items.length, ids: items.map((i) => i.id),
+        /* נושא ציבורי שנערך חוזר להמתנה לאישור */
+        review_status: updated[0].review_status,
       },
     });
   } catch (err) {
@@ -674,14 +683,3 @@ Deno.serve(async (req) => {
     return json({ error: (err as Error).message.slice(0, 400) }, 500);
   }
 });
-
-/* מזהה המשתמש מהטוקן — נדרש רק כשאין עדיין אף נושא בבעלותו */
-async function currentUid(bearer: string): Promise<string> {
-  const url = Deno.env.get('SUPABASE_URL')?.trim();
-  const anon = Deno.env.get('SUPABASE_ANON_KEY')?.trim();
-  const r = await fetch(`${url}/auth/v1/user`, {
-    headers: { apikey: anon ?? '', Authorization: `Bearer ${bearer}` },
-  });
-  if (!r.ok) throw new Error('לא הצלחתי לזהות את המשתמש');
-  return (await r.json()).id as string;
-}
