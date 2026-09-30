@@ -321,12 +321,14 @@ declare
   v_visibility text;
   v_updated    timestamptz;
   v_owner      uuid;
+  v_current    text;
   v_status     text;
 begin
   if not public.is_admin() then raise exception 'אין הרשאה' using errcode = '42501'; end if;
 
   -- PT404: קוד שגיאה ש-PostgREST מתרגם ל-HTTP 404
-  select d.visibility, d.updated_at, d.owner_id into v_visibility, v_updated, v_owner
+  select d.visibility, d.updated_at, d.owner_id, d.review_status
+    into v_visibility, v_updated, v_owner, v_current
     from public.decks d where d.id = p_deck for update;
   if not found then raise exception 'החבילה לא נמצאה' using errcode = 'PT404'; end if;
 
@@ -342,6 +344,11 @@ begin
      where id = p_deck
     returning review_status into v_status;
   elsif p_verdict = 'rejected' then
+    -- דוחים רק מה שפורסם (או שכבר נדחה, לתיקון ההערה). אחרת "דחייה" של
+    -- חבילה פרטית הייתה חושפת אותה לאדמין דרך decks_read.
+    if v_visibility <> 'public' and v_current <> 'rejected' then
+      raise exception 'החבילה אינה ציבורית';
+    end if;
     update public.decks
        set visibility = 'private', review_status = 'rejected',
            review_note = nullif(trim(p_note), ''),
