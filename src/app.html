@@ -2152,6 +2152,13 @@ const LIB = {
 let pendingShare = null;         /* נושא שהגיע בקישור — נפתח אחרי הטעינה */
 
 const REST_TIMEOUT = 30000;
+/* הדף בדרך החוצה (טעינה מחדש, מעבר להתחברות). בקשות בטיסה נקטעות
+   אז ב-Failed to fetch, וזה לא תקלה — הנתונים נשארים בתור ונשלחים
+   בעלייה הבאה. דף שחזר מה-bfcache ממשיך כרגיל. */
+let leaving = false;
+addEventListener('pagehide', function(){ leaving = true; });
+addEventListener('pageshow', function(){ leaving = false; });
+
 function rest(path, init, retried){
   init = init || {};
   const quiet = !!init.quiet;
@@ -2195,7 +2202,7 @@ function rest(path, init, retried){
     if(timer){ clearTimeout(timer); timer = null; }
     /* אופליין הוא מצב, לא תקלה — לא ממלאים את היומן ברעש */
     const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
-    if(!quiet && !(err && err.quiet) && !offline)
+    if(!quiet && !(err && err.quiet) && !offline && !leaving)
       logError('fetch', where + ' → ' + (err && err.name === 'AbortError' ? 'timeout' :
                (err && err.message ? err.message : 'נכשל')), null);
     throw err;

@@ -494,6 +494,30 @@ try {
   check(noLoop.n === 2, `שליחה שנכשלה או תקלה במקביל: ${noLoop.n} רשומות במקום 2`);
   check(noLoop.stamped, 'שורת יומן נשלחה בלי user_id, בלי זמן התקלה, או עם שדה מקומי');
 
+  /* בקשה שנקטעה כי הדף יוצא (טעינה מחדש אחרי דיפלוי) אינה תקלה.
+     שתי התקלות היחידות ביומן היו בדיוק זה. דף שחזר — נרשם שוב. */
+  const leave = JSON.parse(await win.eval(`(function(){
+    const save = {AUTH:AUTH, UID:UID}, realFetch = fetch;
+    AUTH = __session('u-leave'); UID = 'u-leave';
+    ERRQ = []; logging = true;          /* בלי שליחה — רק מה שנרשם */
+    fetch = function(){ return Promise.reject(new TypeError('Failed to fetch')); };
+    const probe = function(){ return rest('decks?select=id').catch(function(){}); };
+    dispatchEvent(new Event('pagehide'));
+    return probe().then(function(){
+      const away = ERRQ.length;
+      dispatchEvent(new Event('pageshow'));
+      return probe().then(function(){
+        const back = ERRQ.length;
+        fetch = realFetch; AUTH = save.AUTH; UID = save.UID;
+        ERRQ = []; logging = false; loggingAgain = false; leaving = false;
+        jwrite(ERRQ_KEY, ERRQ);
+        return JSON.stringify({away:away, back:back});
+      });
+    });
+  })()`));
+  check(leave.away === 0, 'בקשה שנקטעה ביציאה מהדף נרשמה ביומן');
+  check(leave.back === 1, 'אחרי חזרה לדף, בקשה שנכשלה לא נרשמה ביומן');
+
   try {
     win.eval(`(function(){
       quiz = null;
@@ -1872,6 +1896,64 @@ try {
   await new Promise((r) => setTimeout(r, 0));
   check(put.some((u) => u.endsWith('icon-192.png')), 'ה-SW לא שמר קובץ תקין בקאש');
   check(!put.some((u) => u.endsWith('missing.png')), 'ה-SW שמר בקאש תשובת שגיאה');
+
+  /* ה-SW מדווח את חתימת הדף שהוא מגיש — אותה חתימה שבדף עצמו */
+  const pageBuild = (html.match(/<meta name="app-build" content="([^"]+)"/) || [])[1];
+  let told = null;
+  handlers.message && handlers.message({ data: { type: 'page-build' }, ports: [{ postMessage: (v) => { told = v; } }] });
+  check(!!pageBuild && told === pageBuild, `ה-SW דיווח חתימה ${told} במקום ${pageBuild}`);
+}
+
+/* SW חדש שתפס שליטה: טעינה מחדש רק כשהדף באמת ישן, ולא באמצע סנכרון.
+   אחרי כל דיפלוי הדף החדש כבר נטען ברשת-תחילה, וה-SW החדש שתפס שליטה
+   שניות אחר כך טען אותו מחדש — קטע את הסנכרון ורשם Failed to fetch. */
+{
+  const tail = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].pop()[1];
+  check(tail.indexOf('controllerchange') > -1, 'לא נמצא סקריפט רישום ה-SW');
+  const pageBuild = (html.match(/<meta name="app-build" content="([^"]+)"/) || [])[1];
+
+  const run = async (answer, busy) => {
+    let onChange = null, reloads = 0;
+    const timers = [];
+    const sandbox = {
+      navigator: { serviceWorker: {
+        controller: { postMessage: (msg, ports) => {
+          if (answer !== undefined && msg && msg.type === 'page-build') ports[0].postMessage(answer);
+        } },
+        register: () => Promise.resolve(),
+        addEventListener: (t, fn) => { if (t === 'controllerchange') onChange = fn; },
+      } },
+      location: { protocol: 'https:', reload: () => { reloads++; } },
+      document: { querySelector: (s) => (s.indexOf('app-build') > -1 ? { content: pageBuild } : null) },
+      addEventListener: () => {},
+      setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+      clearTimeout: () => {},
+      /* לא זה של Node — פורט פתוח שלו מחזיק את התהליך בחיים */
+      MessageChannel: function () {
+        const port1 = {};
+        this.port1 = port1;
+        this.port2 = { postMessage: (v) => Promise.resolve().then(() => port1.onmessage && port1.onmessage({ data: v })) };
+      },
+      quiz: null, syncingAll: busy ? {} : null, cardSync: null, leaving: false,
+    };
+    vm.runInNewContext(tail, sandbox);
+    onChange();                                 /* הראשון אחרי ביקור עם SW — גרסה חדשה */
+    await new Promise((r) => setTimeout(r, 20));
+    /* בלי תשובה — רק שעון החסות של 3 שניות מכריע */
+    const guard = timers.find((t) => t.ms === 3000);
+    if (answer === undefined && guard) { guard.fn(); await new Promise((r) => setTimeout(r, 0)); }
+    return { reloads, leaving: sandbox.leaving, deferred: timers.some((t) => t.ms === 5000) };
+  };
+
+  const same = await run(pageBuild);
+  check(same.reloads === 0, 'SW של אותה בנייה טען את הדף מחדש');
+  const older = await run('0000deadbeef');
+  check(older.reloads === 1, 'SW של בנייה חדשה לא טען את הדף הישן מחדש');
+  check(older.leaving === true, 'טעינה מחדש לא סימנה שהדף יוצא — הבקשות שנקטעות יירשמו');
+  const silent = await run(undefined);
+  check(silent.reloads === 1, 'SW שלא ענה לא גרם לטעינה מחדש (נפילה להתנהגות הקודמת)');
+  const syncing = await run('0000deadbeef', true);
+  check(syncing.reloads === 0 && syncing.deferred, 'טעינה מחדש לא חיכתה לסנכרון שבטיסה');
 }
 
 check(win.eval('lastPaintError') === null, 'מסך קרס במהלך הבדיקות: ' + win.eval('lastPaintError'));
