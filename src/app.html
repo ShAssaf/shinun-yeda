@@ -3434,6 +3434,17 @@ function authRead(){
    ומנסה שוב לפני שהוא מוותר. */
 function authWrite(v){
   if(!v){ jremove(AUTH_KEY); return true; }
+  /* לשונית אחרת אולי כבר סובבה את הטוקן. כתיבה של האובייקט שבזיכרון
+     (למשל אחרי בדיקת הרשאות) הייתה מחזירה לדיסק טוקן רענון ישן, והרענון
+     הבא עם הטוקן הישן היה נדחה ומנתק. אם בדיסק יש טוקן חדש יותר של אותו
+     משתמש — מאמצים אותו. */
+  const disk = jread(AUTH_KEY, null);
+  if(isObj(disk) && disk.access && disk.refresh && disk.refresh !== v.refresh){
+    const a = claims(disk.access), b = claims(v.access);
+    if(a.sub && a.sub === b.sub && (a.exp || 0) > (b.exp || 0)){
+      v.access = disk.access; v.refresh = disk.refresh;
+    }
+  }
   return jwrite(AUTH_KEY, v);
 }
 let AUTH = authRead();
@@ -3527,7 +3538,19 @@ function revoke(tok){
    כרטיסים, תור והגדרות נשארים תחת ה-uid — אולי עוד לא נשלחו — ואינם
    מוצגים לאף משתמש אחר. */
 function signOut(){
-  revoke(AUTH && AUTH.access);
+  /* ביטול בשרת דורש טוקן גישה תקף. אם פג — מרעננים פעם אחת ומבטלים
+     עם החדש; אחרת המפגש (וטוקן הרענון שלו) נשאר חי בשרת. */
+  const a = AUTH;
+  if(a && a.refresh && tokenStale() && CFG.supabaseUrl){
+    try{
+      fetch(CFG.supabaseUrl + '/auth/v1/token?grant_type=refresh_token', {
+        method:'POST', headers:{ apikey: CFG.supabaseKey, 'Content-Type':'application/json' },
+        body: JSON.stringify({ refresh_token: a.refresh })
+      }).then(function(r){ return r.ok ? r.json() : null; })
+        .then(function(j){ if(j && j.access_token) revoke(j.access_token); })
+        .catch(function(){});
+    }catch(e){}
+  } else revoke(a && a.access);
   if(UID){ jremove(ukey(ROWS_KEY)); jremove(ukey(EXPLAIN_KEY)); }
   hardSignOut('התנתקת.');
   view = {name:'home', lockErr:null};
@@ -3599,12 +3622,12 @@ function tokenExp(){
   const e = claims(AUTH.access).exp;
   return isFinite(e) && e > 0 ? e * 1000 : 0;
 }
-function tokenStale(){
+function tokenStale(margin){
   const exp = tokenExp();
   /* לא הצלחנו לקרוא תוקף — מניחים שפג ומרעננים. ההנחה ההפוכה גורמת
      לכך שלא מרעננים לעולם, וכל שאילתה חוזרת 401. */
   if(!exp) return true;
-  return Date.now() > exp - 60000;   /* דקה מרווח */
+  return Date.now() > exp - (margin == null ? 60000 : margin);   /* דקה מרווח */
 }
 
 /* ===========================================================
@@ -3655,10 +3678,15 @@ function doRefresh(){
   const ep = SESSION.epoch, rt = AUTH.refresh;
   const signedOut = function(){ return ep !== SESSION.epoch || !AUTH; };
   const rotated   = function(){ return !!AUTH && AUTH.refresh !== rt; };
+  /* בקשה תקועה מחזיקה את הנעילה המשותפת ומקפיאה את כל הלשוניות — גוזרים */
+  const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = ctl ? setTimeout(function(){ ctl.abort(); }, 20000) : null;
+  const done = function(x){ if(timer) clearTimeout(timer); return x; };
   return fetch(CFG.supabaseUrl + '/auth/v1/token?grant_type=refresh_token', {
     method:'POST',
     headers:{ apikey: CFG.supabaseKey, 'Content-Type':'application/json' },
-    body: JSON.stringify({ refresh_token: rt })
+    body: JSON.stringify({ refresh_token: rt }),
+    signal: ctl ? ctl.signal : undefined
   }).then(function(r){
     if(r.ok) return r.json().then(function(j){
       if(!j || !j.access_token) return 'terminal';
@@ -3684,19 +3712,31 @@ function doRefresh(){
       return 'terminal';
     });
   }).catch(function(err){
-    /* אין רשת. המפגש עדיין תקף, ננסה שוב מאוחר יותר. */
-    SESSION.lastError = (err && err.message) || 'שגיאת רשת';
+    /* אין רשת (או שהבקשה נגזרה). המפגש עדיין תקף, ננסה שוב מאוחר יותר. */
+    SESSION.lastError = (err && err.name === 'AbortError') ? 'הרענון נתקע' : ((err && err.message) || 'שגיאת רשת');
     return 'transient';
-  });
+  }).then(done);
 }
 
 /* נקודת הכניסה היחידה. force מרענן גם כשהטוקן נראה תקף — למשל
-   אחרי 401 שהגיע בכל זאת. */
+   אחרי 401 שהגיע בכל זאת. 'soon' — הרענון היזום: רק אם נשארו פחות
+   משתי דקות וחצי (הטיימר מכוון לשתי דקות לפני הפקיעה; ensureToken רגיל
+   מרענן רק בדקה האחרונה, ופעם הטיימר לא עשה כלום). */
+const REFRESH_SOON = 150000;
 function ensureToken(force){
   if(!AUTH || !AUTH.access) return Promise.resolve(false);
   if(!force && !tokenStale()) return Promise.resolve(true);
+  if(force === 'soon' && !tokenStale(REFRESH_SOON)) return Promise.resolve(true);
   if(!SESSION.refreshing){
-    SESSION.refreshing = refreshLocked().then(function(res){
+    const rt = AUTH.refresh, ep = SESSION.epoch;
+    SESSION.refreshing = refreshLocked(function(){
+      /* התנתקות בזמן שחיכינו לנעילה */
+      if(ep !== SESSION.epoch || !AUTH) return Promise.resolve('aborted');
+      /* בזמן שחיכינו לשונית אחרת רעננה, ואימצנו את הטוקן שלה */
+      if(AUTH.refresh !== rt && !tokenStale(force === 'soon' ? REFRESH_SOON : 60000))
+        return Promise.resolve('ok');
+      return doRefresh();
+    }).then(function(res){
       SESSION.refreshing = null;
       if(res === 'terminal'){ hardSignOut(); return false; }
       if(res === 'transient') retryRefreshLater();
@@ -3709,13 +3749,13 @@ function ensureToken(force){
 /* לשוניות פתוחות מרעננות באותו רגע (אותו exp). נעילה משותפת מסדרת אותן:
    השנייה נכנסת אחרי הראשונה, מוצאת את הטוקן החדש בדיסק ומאמצת אותו
    (adoptFromDisk בתחילת doRefresh) במקום לשרוף עוד טוקן רענון. */
-function refreshLocked(){
+function refreshLocked(work){
   try{
     if(navigator.locks && typeof navigator.locks.request === 'function')
-      return navigator.locks.request('shinun-refresh', function(){ return doRefresh(); })
-        .catch(function(){ return doRefresh(); });
+      return navigator.locks.request('shinun-refresh', function(){ return work(); })
+        .catch(function(){ return work(); });
   }catch(e){}
-  return doRefresh();
+  return work();
 }
 
 /* רענון יזום לפני הפקיעה, כדי שפעולה של המשתמש לא תשלם על בקשה
@@ -3727,14 +3767,14 @@ function scheduleRefresh(){
   if(!exp) return;
   const wait = Math.max(15000, exp - Date.now() - 120000);   /* שתי דקות מרווח */
   if(wait > 2147483647) return;
-  SESSION.timer = setTimeout(function(){ SESSION.timer = null; ensureToken(false); }, wait);
+  SESSION.timer = setTimeout(function(){ SESSION.timer = null; ensureToken('soon'); }, wait);
 }
 /* רענון שנכשל בגלל רשת — עוד ניסיון, במרווח שגדל עד חמש דקות */
 function retryRefreshLater(){
   if(!AUTH) return;
   if(SESSION.timer) clearTimeout(SESSION.timer);
   SESSION.backoff = Math.min(300000, (SESSION.backoff || 15000) * 2);
-  SESSION.timer = setTimeout(function(){ SESSION.timer = null; ensureToken(false); }, SESSION.backoff);
+  SESSION.timer = setTimeout(function(){ SESSION.timer = null; ensureToken('soon'); }, SESSION.backoff);
 }
 
 /* לשונית אחרת (האפליקציה המותקנת ולשונית בדפדפן, למשל) שינתה משהו */

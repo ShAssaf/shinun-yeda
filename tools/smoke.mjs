@@ -1458,6 +1458,58 @@ try {
   check(r.monotonic, 'חזרה אחרי מצב מ"שעון מקדים" נחתמה כישנה ותידחה בשרת');
 }
 
+/* 5af — רענון יזום באמת מרענן; יציאה מבטלת את המפגש גם כשהטוקן פג;
+   כתיבת המפגש לא מחזירה לדיסק טוקן ישן מזה שלשונית אחרת שמרה */
+{
+  const r = JSON.parse(await win.eval(`(function(){
+    const save = AUTH, realFetch = fetch, savedDisk = localStorage.getItem('shinun-auth');
+    const now = Math.floor(Date.now()/1000);
+    const tok = function(exp, sub){ return 'h.' + btoa(JSON.stringify({exp:exp, sub:sub || 'uZ'})) + '.s'; };
+    const out = {};
+    let calls = [];
+    fetch = function(url){
+      calls.push(String(url));
+      return Promise.resolve({ok:true, json:function(){
+        return Promise.resolve({access_token:tok(now + 3600), refresh_token:'r-new'});
+      }});
+    };
+    SESSION.refreshing = null;
+    AUTH = {access:tok(now + 100), refresh:'r-old', uid:'uZ'};
+    return ensureToken('soon').then(function(){
+      out.soonRefreshed = calls.filter(function(u){ return u.indexOf('refresh_token') > -1; }).length === 1;
+      calls = [];
+      AUTH = {access:tok(now + 3000), refresh:'r-old', uid:'uZ'};
+      return ensureToken('soon');
+    }).then(function(){
+      out.soonSkipsFresh = calls.length === 0;
+      /* יציאה עם טוקן שפג: רענון ואז ביטול עם הטוקן החדש */
+      calls = [];
+      AUTH = {access:tok(now - 30), refresh:'r-old', uid:'uZ', email:'z@t'};
+      signOut();
+      return new Promise(function(res){ setTimeout(res, 30); });
+    }).then(function(){
+      out.revokeFresh = calls.length === 2 && calls[0].indexOf('refresh_token') > -1 && calls[1].indexOf('/logout') > -1;
+      /* authWrite: בדיסק טוקן חדש יותר של אותו משתמש */
+      localStorage.setItem('shinun-auth', JSON.stringify({access:tok(now + 3500), refresh:'r-disk', uid:'uZ'}));
+      const mem = {access:tok(now + 100), refresh:'r-mem', uid:'uZ', admin:true};
+      authWrite(mem);
+      const disk = JSON.parse(localStorage.getItem('shinun-auth'));
+      out.keptNewer = disk.refresh === 'r-disk' && mem.refresh === 'r-disk' && disk.admin === true;
+      fetch = realFetch; AUTH = save;
+      if(savedDisk) localStorage.setItem('shinun-auth', savedDisk); else localStorage.removeItem('shinun-auth');
+      /* signOut ניתק את המשתמש מהזיכרון — מחזירים את מצב הבדיקה */
+      bindUser(authUid());
+      LIB.status = 'ok'; LIB.rows = localRows(); applyRows();
+      quiz = null; view = {name:'home'}; renderNow();
+      return JSON.stringify(out);
+    });
+  })()`));
+  check(r.soonRefreshed, 'הרענון היזום לא מרענן טוקן שנשארו לו פחות משתי דקות וחצי');
+  check(r.soonSkipsFresh, 'הרענון היזום מרענן טוקן שעוד רחוק מפקיעה');
+  check(r.revokeFresh, 'יציאה עם טוקן שפג לא ביטלה את המפגש בשרת');
+  check(r.keptNewer, 'כתיבת המפגש החזירה לדיסק טוקן רענון ישן');
+}
+
 /* 5q — צ'אט ההוספה: היסטוריה, צירוף קבצים, והדבקה מהלוח */
 {
   const src = win.eval('openAddSheet.toString()');

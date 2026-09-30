@@ -220,6 +220,7 @@ begin
   -- עדכון של משתמש רגיל: שדות הבקרה, הבעלות והזמנים אינם בידיו.
   -- updated_at זז רק כשהתוכן משתנה — זו הגרסה שהאדמין מאשר (admin_review_deck
   -- משווה אליה), ולכן אסור שהבעלים יוכל לקבע אותה.
+  new.id            := old.id;          -- החלפת מזהים הייתה מעבירה תוכן אחר דרך p_seen
   new.owner_id      := old.owner_id;
   new.created_at    := old.created_at;
   new.updated_at    := case when (new.data, new.title, new.subtitle, new.kind)
