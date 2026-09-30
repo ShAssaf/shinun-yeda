@@ -8,6 +8,8 @@
  */
 const VERSION = '__BUILD__';
 const CACHE = 'shinun-' + VERSION;
+/* חתימת הבנייה של הדף שה-SW הזה מגיש (app-build) */
+const PAGE = '__PAGE__';
 
 const SHELL = [
   './',
@@ -46,6 +48,12 @@ self.addEventListener('activate', (e) => {
       .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
+});
+
+/* הדף שואל לאיזו בנייה ה-SW שייך, כשהוא תופס שליטה. דף שנטען
+   ברשת-תחילה כבר מריץ אותה, וטעינה מחדש רק הייתה קוטעת אותו. */
+self.addEventListener('message', (e) => {
+  if (e.data && e.data.type === 'page-build' && e.ports && e.ports[0]) e.ports[0].postMessage(PAGE);
 });
 
 self.addEventListener('fetch', (e) => {

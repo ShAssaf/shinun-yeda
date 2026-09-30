@@ -31,17 +31,40 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
      מה לאבד. התרגול עצמו כבר שמור במכשיר, אבל הסבב שבאמצע לא. */
   var hadController = !!navigator.serviceWorker.controller;
   var swReloaded = false;
+  /* גם סנכרון בטיסה הוא "באמצע": טעינה מחדש קוטעת אותו, וכל בקשה
+     שנקטעה נרשמה ביומן כ-Failed to fetch */
   var reloadWhenIdle = function () {
     if (swReloaded) return;
     var busy = false;
-    try { busy = !!(quiz && !quiz.done) || !!document.querySelector('.sheet-bg'); } catch (e) {}
+    try {
+      busy = !!(quiz && !quiz.done) || !!document.querySelector('.sheet-bg') ||
+             !!syncingAll || !!cardSync;
+    } catch (e) {}
     if (busy) { setTimeout(reloadWhenIdle, 5000); return; }
     swReloaded = true;
+    try { leaving = true; } catch (e) {}
     location.reload();
+  };
+  /* ה-SW החדש אומר איזו בנייה של הדף הוא מגיש. אחרי דיפלוי, פתיחת
+     האפליקציה מביאה את הדף החדש ברשת-תחילה, וה-SW החדש תופס שליטה
+     שניות אחר כך — טעינה מחדש אז לא מחליפה כלום, רק מחזירה למסך
+     הבית באמצע הסנכרון. בלי תשובה — טוענים מחדש, כמו קודם. */
+  var sameBuild = function (sw) {
+    var mine = (document.querySelector('meta[name="app-build"]') || {}).content;
+    return new Promise(function (resolve) {
+      if (!sw || !mine || typeof MessageChannel !== 'function') return resolve(false);
+      var ch = new MessageChannel();
+      var t = setTimeout(function () { resolve(false); }, 3000);
+      ch.port1.onmessage = function (e) { clearTimeout(t); resolve(e.data === mine); };
+      try { sw.postMessage({ type: 'page-build' }, [ch.port2]); }
+      catch (e) { clearTimeout(t); resolve(false); }
+    });
   };
   navigator.serviceWorker.addEventListener('controllerchange', function () {
     if (!hadController) { hadController = true; return; }
-    reloadWhenIdle();
+    sameBuild(navigator.serviceWorker.controller).then(function (same) {
+      if (!same) reloadWhenIdle();
+    });
   });
 }
 </script>
@@ -96,8 +119,9 @@ for (const f of ['fonts.css', 'manifest.webmanifest', 'icons/icon-192.png', 'ico
   try { stampHash.update(await readFile(join(ROOT, 'www', f))); } catch {}
 }
 const stamp = stampHash.digest('hex').slice(0, 12);
-const sw = swSrc.replace('__BUILD__', stamp);
-if (sw.includes('__BUILD__')) throw new Error('לא הוחלף מציין הגרסה ב-sw.js');
+/* ה-SW יודע גם את חתימת הדף, כדי שדף שכבר מריץ אותה לא ייטען מחדש */
+const sw = swSrc.replace('__BUILD__', stamp).replace('__PAGE__', build);
+if (sw.includes('__BUILD__') || sw.includes('__PAGE__')) throw new Error('לא הוחלף מציין הגרסה ב-sw.js');
 await writeFile(join(ROOT, 'www', 'sw.js'), sw, 'utf8');
 
 /* ---- dist/artifact.html ---- */
