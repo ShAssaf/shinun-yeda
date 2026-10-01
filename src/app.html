@@ -625,6 +625,27 @@ h1{
 }
 .share-row .act.on{color:var(--accent);border-color:var(--accent)}
 .share-row .act:disabled{opacity:.5;cursor:default}
+.store-sec .panel.share{margin-bottom:8px}
+.mg-into{display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--ink-2)}
+.mg-into select{
+  flex:1;min-width:0;background:var(--bg);color:var(--ink);border:1px solid var(--line);
+  border-radius:10px;padding:8px 10px;font:inherit;font-size:14px;
+}
+.mg-list{display:flex;flex-direction:column;gap:6px}
+.mg-item{
+  display:flex;align-items:flex-start;gap:10px;border:1px solid var(--line);border-radius:10px;
+  padding:9px 10px;cursor:pointer;
+}
+.mg-item:has(input:checked){border-color:var(--accent)}
+.mg-item input{margin:2px 0 0;accent-color:var(--accent);flex:none;width:16px;height:16px}
+.mg-item span{font-size:12px;color:var(--ink-2);line-height:1.45;min-width:0}
+.mg-item b{display:block;font-size:14px;font-weight:600;color:var(--ink)}
+.mg-acts{display:flex;gap:8px}
+.mg-acts .act{
+  border:1px solid var(--line-2);border-radius:99px;padding:6px 13px;font-size:12.5px;color:var(--ink-2);
+}
+.mg-acts .act.on{color:var(--accent);border-color:var(--accent)}
+.mg-acts .act:disabled{opacity:.5;cursor:default}
 .vis{
   flex:none;font-size:10.5px;border-radius:99px;padding:1px 8px;
   border:1px solid var(--line-2);color:var(--ink-2);font-weight:400;
@@ -658,6 +679,8 @@ h1{
 .arow .acts button.ok{color:var(--ok);border-color:var(--ok)}
 .arow .acts button.danger:hover{color:var(--bad);border-color:var(--bad)}
 .arow .acts button:disabled{opacity:.5;cursor:default}
+.arow.bulk{border-style:dashed;border-color:var(--bad)}
+.arow.bulk .acts button.danger{color:var(--bad);border-color:var(--bad)}
 .ekind.k-sync{color:var(--accent);border-color:var(--accent)}
 .ewho{font-family:"IBM Plex Sans",sans-serif;font-size:11px;color:var(--ink-2);margin-top:4px;word-break:break-all}
 
@@ -4303,20 +4326,55 @@ function pubState(d){
   return {cls:'', label:'פרטית', live:false};
 }
 
-/* ההיסטוריה של חבילה כפולה עוברת לזו שנשארת לפני המחיקה — אחרת
-   תרגול שנעשה בעותק השני נראה כאילו נמחק */
-function moveDeckKeys(fromId, toId){
-  const from = fromId + ':', to = toId + ':';
+/* העברת העותק המקומי של ההתקדמות ממפתח למפתח. target(k) מחזיר את
+   המפתח החדש, או null כשהכרטיס לא זז. כשכבר יש משהו תחת החדש — נשאר
+   זה עם החזרה המאוחרת, בדיוק כמו בשרת. גם יומן החזרות שעוד לא נשלח
+   עובר, אחרת היה נשלח תחת מפתח שכבר לא קיים. */
+function moveCardKeys(target){
   let moved = 0;
   Object.keys(CARDS).forEach(function(k){
-    if(k.indexOf(from) !== 0) return;
-    const nk = to + k.slice(from.length), st = CARDS[k];
+    const nk = target(k);
+    if(!nk || nk === k) return;
+    const st = CARDS[k];
     if(validState(st) && (!CARDS[nk] || st.last > CARDS[nk].last)){ CARDS[nk] = st; DIRTY[nk] = 1; }
     delete CARDS[k]; delete DIRTY[k];
     moved++;
   });
+  LOGQ.forEach(function(e){
+    const nk = target(e.card_key);
+    if(nk && nk !== e.card_key){ e.card_key = nk; moved++; }
+  });
   if(moved) saveCards();
   return moved;
+}
+
+/* ההיסטוריה של חבילה כפולה עוברת לזו שנשארת לפני המחיקה — אחרת
+   תרגול שנעשה בעותק השני נראה כאילו נמחק */
+function moveDeckKeys(fromId, toId){
+  const from = fromId + ':', to = toId + ':';
+  return moveCardKeys(function(k){ return k.indexOf(from) === 0 ? to + k.slice(from.length) : null; });
+}
+
+/* איחוד נושאים — בשרת, בטרנזקציה אחת (merge_decks): הפריטים מצטרפים ליעד,
+   וההתקדמות עוברת איתם. קודם נשלח מה שממתין, כדי שהשרת יעביר את המצב
+   האחרון; אחר כך העותק המקומי עובר לפי אותה מפה שהשרת השתמש בה. */
+function mergeDecks(intoId, fromIds){
+  return syncCards(false).catch(function(){})
+    .then(function(){ return rpcJson('merge_decks', {p_into:intoId, p_from:fromIds}); })
+    .then(function(res){
+      const map = (res && isObj(res.map)) ? res.map : {};
+      moveCardKeys(function(k){ return Object.prototype.hasOwnProperty.call(map, k) ? map[k] : null; });
+      return res || {};
+    });
+}
+
+/* מה אפשר לאחד לתוך נושא: אותו סוג, לא עץ האיזומרים (יש בו הפניות בין
+   פריטים), ורק מה שיש לי גישה אליו — שלי, או של אחרים שמוצג לי במאגר */
+function mergeCandidates(into, mine, others){
+  if(!into || into.kind === 'iso') return [];
+  return mine.concat(others).filter(function(d){
+    return d.id !== into.id && d.kind === into.kind;
+  });
 }
 
 function renderStore(){
@@ -4348,6 +4406,38 @@ function renderStore(){
 
   const mine = view.mine || [], others = view.others || [];
   const dups = duplicateDecks(mine);
+  /* יעדים אפשריים לאיחוד: נושא שלי שיש מה לצרף אליו */
+  const targets = mine.filter(function(d){ return mergeCandidates(d, mine, others).length; });
+  const mg = view.merge;
+  if(mg && !targets.some(function(d){ return d.id === mg.into; })) view.merge = null;
+
+  function mergePanel(){
+    const into = targets.filter(function(d){ return d.id === mg.into; })[0];
+    const cands = mergeCandidates(into, mine, others);
+    const picked = mg.from.filter(function(id){ return cands.some(function(d){ return d.id === id; }); });
+    return '<div class="panel share merge">'+
+      '<div class="share-row"><div><strong>איחוד נושאים</strong>'+
+        '<span>הכרטיסים של הנושאים שתסמן מצטרפים לנושא היעד, והיסטוריית התרגול עוברת איתם. '+
+        'כרטיס שכבר קיים ביעד לא מוכפל.</span></div></div>'+
+      '<label class="mg-into">לתוך'+
+        '<select id="mgInto">'+targets.map(function(d){
+          return '<option value="'+esc(d.id)+'"'+(d.id === mg.into ? ' selected' : '')+'>'+
+                 esc(d.title)+' ('+(d.item_count || 0)+')</option>';
+        }).join('')+'</select></label>'+
+      '<div class="mg-list">'+cands.map(function(d){
+        const own = d.owner_id === UID;
+        return '<label class="mg-item"><input type="checkbox" data-mg="'+esc(d.id)+'"'+
+               (picked.indexOf(d.id) > -1 ? ' checked' : '')+'>'+
+               '<span><b>'+esc(d.title)+'</b>'+(d.item_count || 0)+' כרטיסים · '+
+               (own ? 'שלך — יימחק אחרי האיחוד' : 'של אחרים — יועתק, והמינוי יוסר')+'</span></label>';
+      }).join('')+'</div>'+
+      '<div class="mg-acts">'+
+        '<button class="act on" id="mgGo"'+(picked.length ? '' : ' disabled')+'>'+
+          (picked.length ? 'אחד '+(picked.length + 1)+' נושאים' : 'סמן מה לצרף')+'</button>'+
+        '<button class="act" id="mgCancel">ביטול</button>'+
+      '</div>'+
+    '</div>';
+  }
   /* מה שקיים בחבילה המוטמעת ועוד לא בספרייה — כולל תוכן שנוצר
      במסלול הישן ונכתב לריפו במקום למסד */
   const have = {};
@@ -4363,6 +4453,7 @@ function renderStore(){
   '<div class="store-wrap">'+
     (view.loading ? '<p class="note">טוען…</p>' : '')+
     (view.err ? '<div class="lib-warn">'+esc(view.err)+'</div>' : '')+
+    (view.note ? '<div class="diag-report">'+esc(view.note)+'</div>' : '')+
     (view.libError
       ? '<div class="lib-warn">הרשימה מהמטמון — '+esc(view.libError)+
           '<button id="storeRetry">נסה שוב</button></div>'
@@ -4381,6 +4472,14 @@ function renderStore(){
           ? 'פרסום הופך נושא לגלוי לכל מי שמחובר, והם יוכלו להוסיף אותו לעצמם. '
           : 'פרסום שולח את הנושא לאישור. אחרי האישור הוא גלוי לכל מי שמחובר, והם יוכלו להוסיף אותו לעצמם. ')+
           'העריכה נשארת אצלך, וכל שינוי מגיע אליהם מיד.</p>'+
+       (view.merge ? mergePanel()
+         : targets.length && !view.loading
+           ? '<div class="panel share mg-start"><div class="share-row">'+
+               '<div><strong>איחוד נושאים</strong>'+
+               '<span>מצרפים כמה נושאים לנושא אחד, וההתקדמות עוברת איתם.</span></div>'+
+               '<button class="act" id="mgOpen">אחד</button>'+
+             '</div></div>'
+           : '')+
        mine.map(function(d){ return card(d, true); }).join('')+'</div>' : '')+
     '<div class="store-sec"><h3>פורסמו על ידי אחרים</h3>'+
       (view.storeErr
@@ -4492,6 +4591,66 @@ function renderStore(){
         .then(function(){ openStore(); if(AUTH && AUTH.admin) loadAdminBadge(); })
         .catch(fail(b));
     });
+  });
+
+  wireMerge(mine, others, targets);
+}
+
+function wireMerge(mine, others, targets){
+  const open = app.querySelector('#mgOpen');
+  if(open) open.addEventListener('click', function(){
+    view.merge = {into:targets[0].id, from:[]}; view.err = null; view.note = null;
+    render();
+  });
+  const mg = view.merge;
+  if(!mg) return;
+
+  app.querySelector('#mgCancel').addEventListener('click', function(){ view.merge = null; render(); });
+  app.querySelector('#mgInto').addEventListener('change', function(e){
+    /* יעד אחר = סוג אחר אולי, ומה שסומן כבר לא בהכרח מתאים */
+    view.merge = {into:e.target.value, from:[]};
+    render();
+  });
+  Array.prototype.forEach.call(app.querySelectorAll('[data-mg]'), function(c){
+    c.addEventListener('change', function(){
+      const id = c.dataset.mg;
+      mg.from = mg.from.filter(function(x){ return x !== id; });
+      if(c.checked) mg.from.push(id);
+      render();
+    });
+  });
+
+  const go = app.querySelector('#mgGo');
+  go.addEventListener('click', function(){
+    const all = mine.concat(others);
+    const pick = function(id){ return all.filter(function(d){ return d.id === id; })[0] || {}; };
+    const into = pick(mg.into), from = mg.from.slice();
+    if(!from.length) return;
+    const own = from.filter(function(id){ return pick(id).owner_id === UID; });
+    const ext = from.filter(function(id){ return pick(id).owner_id !== UID; });
+    const names = function(ids){ return ids.map(function(id){ return '"' + (pick(id).title || '') + '"'; }).join(', '); };
+    const admin = !!(AUTH && AUTH.admin);
+    if(!confirm('לאחד ' + from.length + ' נושאים לתוך "' + (into.title || '') + '"?' +
+                (own.length ? '\n\n' + names(own) + ' יימחקו אחרי האיחוד. הפעולה אינה הפיכה.' : '') +
+                (ext.length ? '\n\n' + names(ext) + ' — הכרטיסים יועתקו אליך, והמינוי יוסר.' : '') +
+                (into.visibility === 'public' && !admin
+                  ? '\n\nהנושא ציבורי, ולכן יחזור לאישור לפני שיופיע שוב במאגר.' : ''))) return;
+    go.disabled = true; go.textContent = 'מאחד…';
+    mutate(function(){ return mergeDecks(into.id, from); })
+      .then(function(res){
+        syncCards(false).catch(function(){});
+        openStore();
+        view.note = 'אוחדו ' + (res.merged || from.length) + ' נושאים לתוך "' + (into.title || '') + '"' +
+                    ' · נוספו ' + (res.added || 0) + ' כרטיסים' +
+                    (res.deleted ? ' · ' + res.deleted + ' נושאים שלך נמחקו' : '');
+        render();
+        if(admin) loadAdminBadge();
+      })
+      .catch(function(e){
+        view.err = 'האיחוד נכשל: ' + ((e && e.message) || 'שגיאה');
+        go.disabled = false; go.textContent = 'אחד ' + (from.length + 1) + ' נושאים';
+        render();
+      });
   });
 }
 
@@ -4685,7 +4844,11 @@ const ADMIN = { pending: 0, seen: {} };   /* seen: הגרסה (updated_at) שנ�
 function rpc(name, args, quiet){
   return rest('rpc/' + name, {method:'POST', quiet:!!quiet, body: JSON.stringify(args || {})});
 }
-/* תשובה של פונקציה שעוד לא קיימת (מיגרציה 0006 לא הורצה) — הודעה ברורה */
+/* המיגרציה שמוסיפה כל פונקציה; מה שלא כאן — מ-0006 */
+const RPC_MIGRATION = {merge_decks:'0007', admin_purge_decks:'0007'};
+
+/* תשובה של פונקציה שעוד לא קיימת (המיגרציה לא הורצה) — הודעה ברורה,
+   ו-missing כדי שמי שיש לו דרך חלופית יוכל ליפול אליה */
 function rpcJson(name, args, quiet){
   return rpc(name, args, quiet).then(function(r){
     if(r.ok) return r.json();
@@ -4693,8 +4856,12 @@ function rpcJson(name, args, quiet){
       let m = t, code = '';
       try{ const j = JSON.parse(t); m = j.message || t; code = j.code || ''; }catch(e){}
       /* PGRST202 = הפונקציה לא קיימת. 404 אחר (PT404) הוא "לא נמצא" אמיתי */
-      if(code === 'PGRST202' || (r.status === 404 && !code))
-        throw new Error('צריך להריץ את מיגרציה 0006 ב-SQL Editor של Supabase');
+      if(code === 'PGRST202' || (r.status === 404 && !code)){
+        const err = new Error('צריך להריץ את מיגרציה ' + (RPC_MIGRATION[name] || '0006') +
+                              ' ב-SQL Editor של Supabase');
+        err.missing = true;
+        throw err;
+      }
       throw new Error(String(m || ('HTTP ' + r.status)).slice(0, 200));
     });
   });
@@ -4754,8 +4921,16 @@ function renderAdmin(){
         ? d.review_status === 'pending'
         : d.review_status !== 'pending';
     });
-    body = rows.length ? rows.map(function(d){ return adminDeckRow(d, v.tab); }).join('')
-      : (v.loading ? '' : '<p class="note">'+(v.tab === 'queue' ? 'אין נושאים שממתינים לאישור.' : 'אין נושאים ציבוריים.')+'</p>');
+    /* מחיקה גורפת רק של מה שפורסם על ידי אחרים — הנושאים של האדמין עצמו
+       לא נכללים, גם אם הם ציבוריים */
+    const bulk = v.tab === 'public' ? purgeable(v.decks) : [];
+    body = (bulk.length
+        ? '<div class="arow bulk"><div class="meta"><b>'+bulk.length+'</b> נושאים ציבוריים של משתמשים אחרים. '+
+            'מחיקה מלאה מסירה אותם מהמאגר ומכל מי שהוסיף אותם, יחד עם ההתקדמות בהם.</div>'+
+            '<div class="acts"><button class="danger" id="purgeAll">מחק את כולם לצמיתות</button></div></div>'
+        : '')+
+      (rows.length ? rows.map(function(d){ return adminDeckRow(d, v.tab); }).join('')
+        : (v.loading ? '' : '<p class="note">'+(v.tab === 'queue' ? 'אין נושאים שממתינים לאישור.' : 'אין נושאים ציבוריים.')+'</p>'));
   } else if(v.tab === 'users'){
     body = (v.users || []).map(adminUserRow).join('') ||
       (v.loading ? '' : '<p class="note">אין משתמשים.</p>');
@@ -4834,6 +5009,20 @@ function adminUserRow(u){
   '</div>';
 }
 
+/* מה שהמחיקה הגורפת תופסת: כל נושא ציבורי — מאושר או ממתין — שאינו של האדמין */
+function purgeable(decks){
+  return (decks || []).filter(function(d){ return d.visibility === 'public' && d.owner_id !== UID; });
+}
+
+/* מחיקה מלאה: הנושא, ואיתו ההתקדמות של כל מי שתרגל אותו (admin_purge_decks).
+   לפני מיגרציה 0007 — מחיקה רגילה, שמשאירה את ההתקדמות יתומה בשרת. */
+function purgeDecks(ids){
+  return rpcJson('admin_purge_decks', {p_decks:ids}).catch(function(e){
+    if(!e || !e.missing) throw e;
+    return Promise.all(ids.map(deleteDeck)).then(function(){ return ids.length; });
+  });
+}
+
 function wireAdminDecks(v){
   const byId = function(id){ return (v.decks || []).filter(function(d){ return d.id === id; })[0] || {}; };
   const act = function(b, work, doneNote){
@@ -4873,8 +5062,28 @@ function wireAdminDecks(v){
     b.addEventListener('click', function(){
       const d = byId(b.dataset.adel);
       if(!confirm('למחוק לצמיתות את "' + (d.title || '') + '" של ' + (d.owner_email || 'המשתמש') +
-                  '? גם המנויים יאבדו אותו. הפעולה אינה הפיכה.')) return;
-      act(b, function(){ return deleteDeck(d.id); }, '"' + (d.title || '') + '" נמחק.');
+                  '? גם המנויים יאבדו אותו, יחד עם ההתקדמות שלהם בו. הפעולה אינה הפיכה.')) return;
+      act(b, function(){ return purgeDecks([d.id]); }, '"' + (d.title || '') + '" נמחק לצמיתות.');
+    });
+  });
+  const all = app.querySelector('#purgeAll');
+  if(all) all.addEventListener('click', function(){
+    const list = purgeable(v.decks);
+    if(!list.length) return;
+    const titles = list.slice(0, 12).map(function(d){ return '· ' + (d.title || 'ללא כותרת'); }).join('\n') +
+                   (list.length > 12 ? '\n· ועוד ' + (list.length - 12) : '');
+    if(!confirm('למחוק לצמיתות ' + list.length + ' נושאים ציבוריים של משתמשים אחרים?\n\n' + titles +
+                '\n\nהם יוסרו מהמאגר ומכל מי שהוסיף אותם, יחד עם ההתקדמות בהם. ' +
+                'הנושאים שלך לא נמחקים. הפעולה אינה הפיכה.')) return;
+    act(all, function(){
+      return purgeDecks(list.map(function(d){ return d.id; })).then(function(n){
+        v.purged = n;
+      });
+    }, list.length + ' נושאים נמחקו לצמיתות.').then(function(){
+      if(v.purged != null && v.purged !== list.length)
+        v.note = v.purged + ' מתוך ' + list.length + ' נמחקו — השאר כבר לא היו קיימים או לא ציבוריים.';
+      v.purged = null;
+      render();
     });
   });
   Array.prototype.forEach.call(app.querySelectorAll('[data-preview]'), function(b){
