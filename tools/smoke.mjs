@@ -1149,7 +1149,7 @@ try {
                  document.querySelectorAll('[data-reject]').length, document.querySelectorAll('[data-adel]').length,
                  document.querySelectorAll('[data-preview]').length].join();
     view.tab = 'public'; renderNow();
-    out.pub = [document.querySelectorAll('.arow').length, document.querySelectorAll('[data-approve]').length,
+    out.pub = [document.querySelectorAll('.arow:not(.bulk)').length, document.querySelectorAll('[data-approve]').length,
                document.querySelectorAll('[data-reject]').length].join();
     view.tab = 'system'; renderNow();
     out.sys = !!document.getElementById('syncNow') && !document.getElementById('wipeCache');
@@ -1508,6 +1508,190 @@ try {
   check(r.soonSkipsFresh, 'הרענון היזום מרענן טוקן שעוד רחוק מפקיעה');
   check(r.revokeFresh, 'יציאה עם טוקן שפג לא ביטלה את המפגש בשרת');
   check(r.keptNewer, 'כתיבת המפגש החזירה לדיסק טוקן רענון ישן');
+}
+
+/* 5ag — איחוד נושאים: רק מאותו סוג; הבקשה נשלחת ליעד הנבחר עם מה שסומן;
+   ההתקדמות המקומית ויומן החזרות עוברים לפי המפה שהשרת החזיר */
+{
+  const r = JSON.parse(await win.eval(`(function(){
+    const save = {AUTH:AUTH, UID:UID, sl:syncLibrary, fs:fetchStore, fr:fetchReviewStatus, subs:LIB.subs,
+                  rows:LIB.rows, conf:window.confirm, CARDS:CARDS, DIRTY:DIRTY, LOGQ:LOGQ};
+    AUTH = __session('uM'); UID = 'uM';
+    CARDS = {}; DIRTY = {}; LOGQ = [];
+    const out = {};
+    const t = function(id, title, kind, owner){ return {id:id, owner_id:owner || 'uM', kind:kind || 'topic', title:title,
+                                                        visibility:'private', item_count:4, data:[]}; };
+    out.cands = mergeCandidates(t('t1','א'), [t('t1','א'), t('t2','ב'), t('g1','ג','groups')],
+                                [t('p1','ד','topic','o'), t('i1','ה','iso','o')]).map(function(d){ return d.id; }).join();
+    out.iso = mergeCandidates(t('i2','ו','iso'), [t('i2','ו','iso'), t('i3','ז','iso')], []).length;
+
+    LIB.subs = ['p1'];
+    LIB.rows = [t('t1','ראשון'), t('t2','שני'), t('g1','קבוצות','groups'), t('p1','ציבורי','topic','o')];
+    syncLibrary = function(){ return Promise.resolve({ok:true}); };
+    fetchStore = function(){ return Promise.resolve({ok:true, data:[
+      {id:'p1', kind:'topic', title:'ציבורי', item_count:5, visibility:'public', owner_id:'o'}]}); };
+    fetchReviewStatus = function(){ return Promise.resolve({}); };
+    lastPaintError = null;
+    openStore();
+    return new Promise(function(res){ setTimeout(res, 40); }).then(function(){
+      renderNow();
+      const open = document.getElementById('mgOpen');
+      out.offered = !!open;
+      open.click(); renderNow();
+      out.targets = Array.from(document.querySelectorAll('#mgInto option')).map(function(o){ return o.value; }).join();
+      out.list = Array.from(document.querySelectorAll('[data-mg]')).map(function(c){ return c.dataset.mg; }).join();
+      out.idle = document.getElementById('mgGo').disabled;
+      /* סימון בסדר הפוך מהרשימה — זה הסדר שנשלח */
+      document.querySelector('[data-mg="p1"]').click(); renderNow();
+      document.querySelector('[data-mg="t2"]').click(); renderNow();
+      out.label = document.getElementById('mgGo').textContent;
+
+      CARDS['t2:a'] = {s:3, d:5, due:Date.now() + 1e8, last:Date.now() - 1000, reps:2, lapses:0};
+      CARDS['t1:x'] = {s:9, d:4, due:Date.now() + 1e9, last:Date.now() - 5000, reps:5, lapses:0};
+      CARDS['p1:x'] = {s:1, d:6, due:Date.now() + 1e7, last:Date.now() - 100, reps:1, lapses:1};
+      LOGQ.push({id:'L1', card_key:'t2:a', rating:3});
+      window.confirm = function(msg){ out.confirm = msg; return true; };
+      const m = __mock(function(req){
+        if(req.url.indexOf('rpc/merge_decks') > -1)
+          return {status:200, body:{into:'t1', added:2, merged:2, deleted:1,
+                                    map:{'t2:a':'t1:a-2', 'p1:x':'t1:x'}}};
+        return {status:200, body:[]};
+      });
+      document.getElementById('mgGo').click();
+      return new Promise(function(res){ setTimeout(res, 60); }).then(function(){
+        const call = m.sent.filter(function(x){ return x.url.indexOf('rpc/merge_decks') > -1; })[0];
+        out.body = call ? call.body.p_into + '|' + call.body.p_from.join() : null;
+        /* אחרי האיחוד הכול נשלח מיד — בודקים את מה שיצא לשרת */
+        const keys = function(table){
+          return [].concat.apply([], m.sent.filter(function(x){ return x.method === 'POST' && x.url.indexOf(table) > -1; })
+                                         .map(function(x){ return x.body || []; }))
+                   .map(function(x){ return x.card_key; });
+        };
+        out.moved = !!CARDS['t1:a-2'] && !CARDS['t2:a'] && keys('card_state').indexOf('t1:a-2') > -1;
+        out.newer = CARDS['t1:x'] && CARDS['t1:x'].reps === 1 && !CARDS['p1:x'];
+        /* מה שחיכה נשלח לפני האיחוד, תחת המפתח הישן — והשרת מעביר אותו */
+        const at = function(part){ return m.sent.map(function(x){ return x.url; })
+                                             .findIndex(function(u){ return u.indexOf(part) > -1; }); };
+        out.flushed = at('review_log') > -1 && at('review_log') < at('rpc/merge_decks') &&
+                      keys('review_log').join() === 't2:a';
+        /* ומה שעוד לא נשלח עובר מקומית */
+        LOGQ = [{id:'L2', card_key:'t2:b', rating:2}];
+        moveCardKeys(function(k){ return k === 't2:b' ? 't1:b' : null; });
+        out.log = LOGQ[0].card_key === 't1:b';
+        LOGQ = [];
+        renderNow();
+        out.note = (document.querySelector('.diag-report') || {}).textContent || '';
+        out.closed = !document.getElementById('mgGo');
+        m.restore();
+
+        /* לפני מיגרציה 0007 — הודעה שמפנה אליה */
+        const m2 = __mock(function(req){
+          return req.url.indexOf('rpc/') > -1 ? {status:404, text:'{"code":"PGRST202","message":"x"}'} : {status:200, body:[]};
+        });
+        return mergeDecks('t1', ['t2']).then(function(){ out.missing = 'resolved'; },
+                                             function(e){ out.missing = e.message; })
+          .then(function(){ m2.restore(); });
+      });
+    }).then(function(){
+      out.crash = lastPaintError;
+      window.confirm = save.conf;
+      syncLibrary = save.sl; fetchStore = save.fs; fetchReviewStatus = save.fr;
+      storageKeys().filter(function(k){ return /:uM$/.test(k); }).forEach(jremove);
+      CARDS = save.CARDS; DIRTY = save.DIRTY; LOGQ = save.LOGQ; __quiet();
+      AUTH = save.AUTH; UID = save.UID; LIB.subs = save.subs;
+      LIB.status = 'ok'; LIB.rows = save.rows; applyRows();
+      quiz = null; view = {name:'home'}; renderNow();
+      return JSON.stringify(out);
+    });
+  })()`));
+  check(r.cands === 't2,p1', 'מועמדים לאיחוד שגויים (רק אותו סוג, בלי היעד): ' + r.cands);
+  check(r.iso === 0, 'עץ האיזומרים מוצע לאיחוד');
+  check(r.offered, 'אין כפתור איחוד במאגר');
+  check(r.targets === 't1,t2', 'יעדי האיחוד שגויים: ' + r.targets);
+  check(r.list === 't2,p1', 'רשימת מה לצרף שגויה: ' + r.list);
+  check(r.idle, 'אפשר לאחד בלי לסמן כלום');
+  check(r.label === 'אחד 3 נושאים', 'תווית כפתור האיחוד שגויה: ' + r.label);
+  check(/"שני" יימחקו/.test(r.confirm || '') && /"ציבורי" — הכרטיסים יועתקו/.test(r.confirm || ''),
+    'האישור לא מבחין בין נושא שלי שיימחק לנושא של אחר שיועתק: ' + r.confirm);
+  check(r.body === 't1|p1,t2', 'בקשת האיחוד שגויה: ' + r.body);
+  check(r.moved, 'ההתקדמות המקומית לא עברה למפתח החדש');
+  check(r.newer, 'בהתנגשות לא נשאר המצב עם החזרה המאוחרת');
+  check(r.flushed, 'יומן החזרות הממתין לא נשלח לפני האיחוד');
+  check(r.log, 'יומן החזרות הממתין לא עבר למפתח החדש');
+  check(/אוחדו 2 נושאים/.test(r.note) && /נוספו 2/.test(r.note), 'אין סיכום אחרי האיחוד: ' + r.note);
+  check(r.closed, 'חלון האיחוד נשאר פתוח אחרי ההצלחה');
+  check(/0007/.test(r.missing || ''), 'איחוד בלי המיגרציה לא מפנה ל-0007: ' + r.missing);
+  check(!r.crash, 'המאגר קרס באיחוד: ' + r.crash);
+}
+
+/* 5ah — ניהול: מחיקה מלאה של נושא, ומחיקה גורפת של הציבוריים של אחרים
+   בלבד; לפני 0007 — נופלת למחיקה רגילה */
+{
+  const r = JSON.parse(await win.eval(`(function(){
+    const save = {AUTH:AUTH, UID:UID, conf:window.confirm, sl:syncLibrary};
+    AUTH = Object.assign(__session('uA'), {admin:true}); UID = 'uA';
+    syncLibrary = function(){ return Promise.resolve({ok:true}); };
+    const out = {};
+    const decks = [
+      {id:'mine', title:'שלי', review_status:'approved', visibility:'public', owner_id:'uA', item_count:4},
+      {id:'o1', title:'אחר', review_status:'approved', visibility:'public', owner_id:'x', item_count:4},
+      {id:'o2', title:'ממתין', review_status:'pending', visibility:'public', owner_id:'y', item_count:4},
+      {id:'o3', title:'נדחה', review_status:'rejected', visibility:'private', owner_id:'z', item_count:4}];
+    out.pick = purgeable(decks).map(function(d){ return d.id; }).join();
+    let m = __mock(function(req){
+      if(req.url.indexOf('rpc/admin_purge_decks') > -1) return {status:200, body:req.body.p_decks.length};
+      if(req.url.indexOf('rpc/admin_moderation') > -1) return {status:200, body:decks};
+      return {status:200, body:[]};
+    });
+    view = {name:'admin', tab:'public', loading:false, loaded:true, decks:decks};
+    renderNow();
+    out.bulk = !!document.getElementById('purgeAll');
+    window.confirm = function(msg){ if(!out.confirm) out.confirm = msg; return true; };
+    document.getElementById('purgeAll').click();
+    return new Promise(function(res){ setTimeout(res, 40); }).then(function(){
+      const call = m.sent.filter(function(x){ return x.url.indexOf('admin_purge_decks') > -1; })[0];
+      out.sent = call ? call.body.p_decks.join() : null;
+      m.restore();
+      view = {name:'admin', tab:'public', loading:false, loaded:true, decks:decks};
+      renderNow();
+      m = __mock(function(req){
+        if(req.url.indexOf('rpc/admin_purge_decks') > -1) return {status:200, body:1};
+        if(req.url.indexOf('rpc/admin_moderation') > -1) return {status:200, body:decks};
+        return {status:200, body:[]};
+      });
+      document.querySelector('[data-adel="o3"]').click();
+      return new Promise(function(res){ setTimeout(res, 40); });
+    }).then(function(){
+      const call = m.sent.filter(function(x){ return x.url.indexOf('admin_purge_decks') > -1; })[0];
+      out.one = call ? call.body.p_decks.join() : null;
+      m.restore();
+      /* לפני 0007: מחיקה רגילה דרך ה-REST */
+      m = __mock(function(req){
+        if(req.url.indexOf('rpc/') > -1) return {status:404, text:'{"code":"PGRST202","message":"x"}'};
+        if(req.method === 'DELETE') return {status:200, body:[{id:'o1'}]};
+        return {status:200, body:[]};
+      });
+      return purgeDecks(['o1']).then(function(n){
+        out.fallback = n + '|' + m.sent.filter(function(x){ return x.method === 'DELETE'; })
+                                       .map(function(x){ return x.url.split('?')[1]; }).join();
+        m.restore();
+      });
+    }).then(function(){
+      out.crash = lastPaintError;
+      window.confirm = save.conf; syncLibrary = save.sl;
+      AUTH = save.AUTH; UID = save.UID; ADMIN.pending = 0;
+      quiz = null; view = {name:'home'}; renderNow();
+      return JSON.stringify(out);
+    });
+  })()`));
+  check(r.pick === 'o1,o2', 'המחיקה הגורפת תופסת משהו מלבד הציבוריים של אחרים: ' + r.pick);
+  check(r.bulk, 'אין כפתור מחיקה גורפת בלשונית הציבוריות');
+  check(/2 נושאים ציבוריים/.test(r.confirm || '') && /הנושאים שלך לא נמחקים/.test(r.confirm || ''),
+    'האישור למחיקה הגורפת לא ברור: ' + r.confirm);
+  check(r.sent === 'o1,o2', 'המחיקה הגורפת שלחה נושאים שגויים: ' + r.sent);
+  check(r.one === 'o3', 'מחיקה של נושא בודד לא עוברת דרך המחיקה המלאה: ' + r.one);
+  check(r.fallback === '1|id=eq.o1', 'בלי 0007 המחיקה לא נופלת למחיקה רגילה: ' + r.fallback);
+  check(!r.crash, 'מסך הניהול קרס במחיקה: ' + r.crash);
 }
 
 /* 5q — צ'אט ההוספה: היסטוריה, צירוף קבצים, והדבקה מהלוח */
